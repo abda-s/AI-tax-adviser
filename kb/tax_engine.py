@@ -7,7 +7,7 @@ class TaxEngine:
         self.M = Symbol('IsMarried')           # Married status
         self.J = Symbol('JointFiling')         # Joint filing status
         self.C = Symbol('HasChildren')         # Presence of children
-        self.SI = Symbol('SpouseIncome')       # Spouse has income
+        self.WI = Symbol('WifeIncome')       # Wife has income
 
         # Conclusion symbols
         self.BaseExemption                 = Symbol('BaseExemption')
@@ -20,14 +20,14 @@ class TaxEngine:
         self.rules = []
         # 1. Unmarried ⇒ BaseExemption
         self.rules.append(Implication(Not(self.M), self.BaseExemption))
-        # 2. Married ∧ JointFiling ∧ ¬HasChildren ∧ ¬SpouseIncome ⇒ FullExemption
-        self.rules.append(Implication(And(self.M, self.J, Not(self.C), Not(self.SI)),
+        # 2. Married ∧ JointFiling ∧ ¬HasChildren ∧ ¬WifeIncome ⇒ FullExemption
+        self.rules.append(Implication(And(self.M, self.J, Not(self.C), Not(self.WI)),
                                       self.FullExemption))
-        # 3. Married ∧ JointFiling ∧ ¬HasChildren ∧ SpouseIncome ⇒ FullExemptionWithoutChildren
-        self.rules.append(Implication(And(self.M, self.J, Not(self.C), self.SI),
+        # 3. Married ∧ JointFiling ∧ ¬HasChildren ∧ WifeIncome ⇒ FullExemptionWithoutChildren
+        self.rules.append(Implication(And(self.M, self.J, Not(self.C), self.WI),
                                       self.FullExemptionWithoutChildren))
-        # 4. Married ∧ JointFiling ∧ HasChildren ∧ SpouseIncome ⇒ FullExemptionWithChildren
-        self.rules.append(Implication(And(self.M, self.J, self.C, self.SI),
+        # 4. Married ∧ JointFiling ∧ HasChildren ∧ WifeIncome ⇒ FullExemptionWithChildren
+        self.rules.append(Implication(And(self.M, self.J, self.C, self.WI),
                                       self.FullExemptionWithChildren))
         # 5. Married ∧ ¬JointFiling ∧ HasChildren ⇒ BaseExemptionWithChildren
         self.rules.append(Implication(And(self.M, Not(self.J), self.C),
@@ -43,7 +43,7 @@ class TaxEngine:
         facts keys:
           - 'married' (bool)
           - 'children' (int)
-          - 'spouse_income' (bool)
+          - 'wife_income' (bool)
           - 'joint_filing' (bool)
 
         Returns a string naming the applicable exemption.
@@ -52,21 +52,58 @@ class TaxEngine:
         kb = And(*self.rules)
 
         # Assert input facts
-        kb.add(self.M if facts.get('married') else Not(self.M))
-        kb.add(self.C if facts.get('children', 0) > 0 else Not(self.C))
-        kb.add(self.SI if facts.get('spouse_income') else Not(self.SI))
-        kb.add(self.J if facts.get('joint_filing') else Not(self.J))
+        print("\n--- Tax Engine Evaluation ---")
+        print("Raw facts from answers:", facts)
+
+        is_married = facts.get('married')
+        has_children = facts.get('children', 0) > 0
+        has_wife_income = facts.get('wife_income')
+        is_joint_filing = facts.get('joint_filing')
+
+        if is_married: kb.add(self.M)
+        else: kb.add(Not(self.M))
+        print(f"  IsMarried: {is_married}")
+
+        if has_children: kb.add(self.C)
+        else: kb.add(Not(self.C))
+        print(f"  HasChildren: {has_children}")
+
+        if has_wife_income: kb.add(self.WI)
+        else: kb.add(Not(self.WI))
+        print(f"  WifeIncome: {has_wife_income}")
+
+        if is_joint_filing: kb.add(self.J)
+        else: kb.add(Not(self.J))
+        print(f"  JointFiling: {is_joint_filing}")
+
+        print("Knowledge Base (KB) after asserting facts:", kb)
 
         # Check in priority order
+        print("\nChecking exemption rules:")
         if model_check(kb, self.FullExemptionWithChildren):
+            print("  -> FullExemptionWithChildren is TRUE")
             return self.FullExemptionWithChildren.name
-        if model_check(kb, self.FullExemptionWithoutChildren):
-            return self.FullExemptionWithoutChildren.name
-        if model_check(kb, self.FullExemption):
-            return self.FullExemption.name
-        if model_check(kb, self.BaseExemptionWithChildren):
-            return self.BaseExemptionWithChildren.name
-        if model_check(kb, self.BaseExemption):
-            return self.BaseExemption.name
+        print("  -> FullExemptionWithChildren is FALSE")
 
+        if model_check(kb, self.FullExemptionWithoutChildren):
+            print("  -> FullExemptionWithoutChildren is TRUE")
+            return self.FullExemptionWithoutChildren.name
+        print("  -> FullExemptionWithoutChildren is FALSE")
+
+        if model_check(kb, self.FullExemption):
+            print("  -> FullExemption is TRUE")
+            return self.FullExemption.name
+        print("  -> FullExemption is FALSE")
+
+        if model_check(kb, self.BaseExemptionWithChildren):
+            print("  -> BaseExemptionWithChildren is TRUE")
+            return self.BaseExemptionWithChildren.name
+        print("  -> BaseExemptionWithChildren is FALSE")
+
+        if model_check(kb, self.BaseExemption):
+            print("  -> BaseExemption is TRUE")
+            return self.BaseExemption.name
+        print("  -> BaseExemption is FALSE")
+
+        print("No matching exemption found.")
         return 'Unknown'

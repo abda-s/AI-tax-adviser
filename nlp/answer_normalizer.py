@@ -11,9 +11,9 @@ def normalize(raw: str, expected_type: str):
     text = raw.strip().lower()
     if expected_type == 'yesno':
         if text in ['yes', 'y', 'true']:
-            return True
+            return 'yes'
         if text in ['no', 'n', 'false']:
-            return False
+            return 'no'
         return None
     if expected_type == 'number':
         # try direct int

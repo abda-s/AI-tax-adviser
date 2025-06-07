@@ -6,10 +6,6 @@ class TextProcessor:
         cfg = load_config()
         # Configure Gemini
         genai.configure(api_key='AIzaSyAuidLUuo5nilcYH4tQWxvcr9LIQKEYIA0')
-        # List available models
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                print(f"Available model: {m.name}")
         # Use gemini-1.5-flash
         self.model = genai.GenerativeModel('gemini-1.5-flash')
 
@@ -50,7 +46,7 @@ class TextProcessor:
                 1. Convert written numbers to digits (e.g., "five" -> "5", "twenty" -> "20")
                 2. Extract numbers from text (e.g., "I have five children" -> "5")
                 3. For salary/income, convert to numerical value (e.g., "fifty thousand" -> "50000")
-                4. For spouse salary question:
+                4. For wife salary question:
                    - If the person says they have no income, zero income, or O, return "0"
                    - If they mention a specific amount, return that number
                 5. Examples:
@@ -78,7 +74,7 @@ class TextProcessor:
                 try:
                     # Ensure it's a valid number
                     num = int(processed_text)
-                    # Allow 0 for spouse salary question
+                    # Allow 0 for wife salary question
                     if num < 0:  # Handle negative numbers
                         return '0'
                     return str(num)
@@ -87,6 +83,10 @@ class TextProcessor:
             
             # Additional validation for yes/no
             if question_type == 'yesno':
+                if processed_text == 'true':
+                    return 'yes'
+                elif processed_text == 'false':
+                    return 'no'
                 if processed_text not in ['yes', 'no']:
                     # If the model didn't return yes/no, do our own basic check
                     text_lower = raw_text.lower()
