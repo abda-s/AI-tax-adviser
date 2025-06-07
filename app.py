@@ -1,11 +1,13 @@
 # app.py
-from gui.gui_app import GUIApp
-import tkinter as tk
+from PyQt6.QtWidgets import QApplication
+from gui.pyqt_app import SmartTaxAdvisor
+import sys
 
 def main():
-    root = tk.Tk()
-    app = GUIApp(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    window = SmartTaxAdvisor()
+    window.show()
+    sys.exit(app.exec())
 
 if __name__ == '__main__':
     main()
