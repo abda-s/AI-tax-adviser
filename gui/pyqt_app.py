@@ -269,16 +269,6 @@ class SmartTaxAdvisor(QMainWindow):
         self.status_label.show()
         self.result_text.show()
         self.mic_indicator.hide()
-        
-        # Initialize webcam
-        if not hasattr(self, 'cap') or self.cap is None:
-            self.cap = cv2.VideoCapture(0)
-            if not self.cap.isOpened():
-                self.update_status("Error: Could not open webcam", "red")
-                return
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 640)
-        
         self.ask_next()
 
     def select_speech_mode(self):
@@ -305,10 +295,22 @@ class SmartTaxAdvisor(QMainWindow):
                     self.answers[1] = '0'   # No children
                     self.answers[2] = 'no'  # Wife doesn't work
                     self.answers[3] = '0'   # Wife's salary is 0
-                    self.answers[4] = 'no'  # Not filing jointly
+                    self.answers[4] = 'no'  # Not filing jointly (can't file jointly if not married)
                     self.current_q = 5      # Skip to salary question
                     self.ask_next()         # Recursively call to ask the next question
                     return
+
+            # For joint filing question, ensure user is married
+            if q['id'] == 4:  # Joint filing question
+                if self.answers.get(0) != 'yes':  # If not married
+                    self.answers[4] = 'no'  # Can't file jointly if not married
+                    self.current_q += 1
+                    self.ask_next()
+                    return
+                else:
+                    # If married, ask about joint filing
+                    self.question_label.setText("Are you filing taxes jointly with your spouse?")
+                    self.tts.speak("Are you filing taxes jointly with your spouse?")
 
             # Conditional logic for spouse salary question (Q3)
             if q['id'] == 3:
@@ -321,8 +323,11 @@ class SmartTaxAdvisor(QMainWindow):
                     self.ask_next() # Recursively call to ask the next question
                     return # Exit to prevent asking the current question
 
-            self.question_label.setText(q['text'])
-            self.tts.speak(q['text'])
+            # For other questions, proceed normally
+            if q['id'] != 4:  # Don't set text for joint filing question as it's handled above
+                self.question_label.setText(q['text'])
+                self.tts.speak(q['text'])
+            
             self.current_number = ""
             self.no_hand_frames = 0
             self.last_label = None
@@ -520,75 +525,6 @@ class SmartTaxAdvisor(QMainWindow):
         self.tts.speak(f'Result: {result}')
         self.result_text.append(f"<br><h2>Conclusion: {result}</h2>")
         self.update_status("Questionnaire completed!", "green")
-
-        # Add Back button
-        back_button = QPushButton("Back to Start")
-        back_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border-radius: 20px;
-                font-size: 20px;
-                padding: 10px 20px;
-                margin: 10px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        back_button.clicked.connect(self.reset_application)
-        self.layout.addWidget(back_button, alignment=Qt.AlignmentFlag.AlignCenter)
-
-    def reset_application(self):
-        """Reset the application to its initial state"""
-        # Clear all answers
-        self.answers = {}
-        
-        # Reset question counter
-        self.current_q = 0
-        
-        # Reset state variables
-        self.current_number = ""
-        self.no_hand_frames = 0
-        self.last_label = None
-        self.can_accept_digit = True
-        self.asking_digits = False
-        self.is_listening = False
-        self.is_capturing = False
-        self.listening_dots = 0
-        
-        # Clear the buffer
-        self.buffer.clear()
-        
-        # Clear and hide result text
-        self.result_text.clear()
-        self.result_text.hide()
-        
-        # Remove back button
-        for i in reversed(range(self.layout.count())): 
-            widget = self.layout.itemAt(i).widget()
-            if isinstance(widget, QPushButton) and widget.text() == "Back to Start":
-                self.layout.removeWidget(widget)
-                widget.deleteLater()
-        
-        # Show initial mode selection
-        self.mode_label.show()
-        self.sign_btn.show()
-        self.speech_btn.show()
-        
-        # Hide other widgets
-        self.video_label.hide()
-        self.question_label.hide()
-        self.status_label.hide()
-        self.mic_indicator.hide()
-        
-        # Reset selected mode
-        self.selected_mode = None
-        
-        # Release webcam if it exists
-        if hasattr(self, 'cap') and self.cap is not None:
-            self.cap.release()
-            self.cap = None
 
 def main():
     app = QApplication(sys.argv)
