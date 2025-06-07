@@ -36,30 +36,42 @@ class ASLDetector:
         )
         self.mp_draw = mp.solutions.drawing_utils
 
-    def _preprocess(self, frame):
+    def _preprocess_letter(self, frame):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(rgb)
         if not results.multi_hand_landmarks:
-            return None
+            return None, None
         lm = results.multi_hand_landmarks[0].landmark
         coords = np.array([[p.x, p.y, getattr(p, 'z', 0)]
                            for p in lm], dtype=np.float32).flatten().reshape(1, -1)
-        # Draw landmarks for visualization
-        self.mp_draw.draw_landmarks(
-            frame,
-            results.multi_hand_landmarks[0],
-            self.mp_hands.HAND_CONNECTIONS
-        )
-        return coords
+        return coords, results.multi_hand_landmarks[0]
+
+    def _preprocess_digit(self, frame):
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(rgb)
+        if not results.multi_hand_landmarks:
+            return None, None
+        lm = results.multi_hand_landmarks[0].landmark
+        # Only use x,y coordinates for digits (42 dimensions)
+        coords = np.array([[p.x, p.y] for p in lm], dtype=np.float32).flatten().reshape(1, -1)
+        return coords, results.multi_hand_landmarks[0]
 
     def recognize_letter(self, frame):
         """
         Recognize ASL letter (A-Z).
         Returns: (label:str or None, confidence:float)
         """
-        coords = self._preprocess(frame)
+        coords, landmarks = self._preprocess_letter(frame)
         if coords is None:
             return None, 0.0
+        
+        # Draw landmarks
+        self.mp_draw.draw_landmarks(
+            frame,
+            landmarks,
+            self.mp_hands.HAND_CONNECTIONS
+        )
+
         proba = self.letter_model.predict(coords, verbose=0)[0]
         idx = int(np.argmax(proba))
         conf = proba[idx]
@@ -72,9 +84,17 @@ class ASLDetector:
         Recognize ASL digit (0-9).
         Returns: (label:str or None, confidence:float)
         """
-        coords = self._preprocess(frame)
+        coords, landmarks = self._preprocess_digit(frame)
         if coords is None:
             return None, 0.0
+        
+        # Draw landmarks
+        self.mp_draw.draw_landmarks(
+            frame,
+            landmarks,
+            self.mp_hands.HAND_CONNECTIONS
+        )
+
         proba = self.digit_model.predict(coords, verbose=0)[0]
         idx = int(np.argmax(proba))
         conf = proba[idx]
