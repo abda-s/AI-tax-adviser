@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor
 import cv2
 from PIL import Image
 from config.config import load_config
