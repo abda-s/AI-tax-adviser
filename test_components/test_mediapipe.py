@@ -26,45 +26,54 @@ def test_mediapipe():
     
     # Start the camera
     picam2.start()
-    print("Camera started successfully")
+    print("Camera started successfully!")
+    print("A window will open with the live feed.")
+    print("Press 'q' in the camera window to quit.")
     
     # Allow camera to warm up
     time.sleep(1)
     
-    # Capture a frame
-    frame = picam2.capture_array()
+    # Initialize drawing utilities
+    mp_draw = mp.solutions.drawing_utils
     
-    # Convert the frame to RGB for MediaPipe
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    
-    # Process the frame with MediaPipe
-    results = hands.process(rgb_frame)
-    
-    if results.multi_hand_landmarks:
-        print("Successfully detected hand landmarks")
-        # Draw the hand landmarks
-        mp_draw = mp.solutions.drawing_utils
-        for hand_landmarks in results.multi_hand_landmarks:
-            mp_draw.draw_landmarks(
-                frame,
-                hand_landmarks,
-                mp_hands.HAND_CONNECTIONS
-            )
-    else:
-        print("No hand detected in frame")
-    
-    # Save the frame
-    cv2.imwrite('test_mediapipe.jpg', frame)
-    print("Saved test frame to 'test_mediapipe.jpg'")
-    
-    # Display the frame
-    cv2.imshow("MediaPipe Test", frame)
-    cv2.waitKey(2000)  # Show for 2 seconds
+    # Loop to continuously get frames from the camera
+    while True:
+        # Capture a frame
+        frame = picam2.capture_array()
+        
+        # Convert the frame to RGB for MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Process the frame with MediaPipe
+        results = hands.process(rgb_frame)
+        
+        # Draw hand landmarks if detected
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_draw.draw_landmarks(
+                    frame,
+                    hand_landmarks,
+                    mp_hands.HAND_CONNECTIONS
+                )
+                # Add text to show hand is detected
+                cv2.putText(frame, "Hand Detected", (10, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        # Display the frame
+        cv2.imshow("MediaPipe Hand Detection - Press 'q' to Quit", frame)
+        
+        # Wait for key press
+        key = cv2.waitKey(1) & 0xFF
+        
+        # If 'q' is pressed, break the loop
+        if key == ord("q"):
+            break
     
     # Clean up
+    print("Closing camera and cleaning up...")
     picam2.stop()
     cv2.destroyAllWindows()
-    print("MediaPipe test completed")
+    print("Test completed.")
 
 if __name__ == '__main__':
     test_mediapipe() 
