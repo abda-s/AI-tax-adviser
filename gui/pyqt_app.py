@@ -49,7 +49,7 @@ class MicrophoneIndicator(QLabel):
         
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.Antialiasing)
         
         # Determine color based on listening state
         current_color = self.active_color
@@ -80,7 +80,7 @@ class MicrophoneIndicator(QLabel):
         if self.is_listening:
             wave_color = QColor(current_color.red(), current_color.green(), current_color.blue(), current_alpha // 2)
             painter.setPen(wave_color)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setBrush(Qt.NoBrush)
             
             # Draw three arcs
             for i in range(3):
@@ -127,7 +127,7 @@ class SmartTaxAdvisor(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         self.layout = QVBoxLayout(central_widget)
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter) # Center the main layout content
+        self.layout.setAlignment(Qt.AlignCenter)
         
         # Load modules
         cfg = load_config()
@@ -167,16 +167,16 @@ class SmartTaxAdvisor(QMainWindow):
         
         # Create widgets
         self.mode_label = QLabel("Select Input Mode:")
-        self.mode_label.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px;") # Increased font size and bold
+        self.mode_label.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px;")
         
         self.sign_btn = QPushButton("Sign Language")
         self.sign_btn.clicked.connect(self.select_sign_mode)
-        self.sign_btn.setFixedSize(250, 150) # Set fixed size for buttons
+        self.sign_btn.setFixedSize(250, 150)
         self.sign_btn.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50; /* Green */
+                background-color: #4CAF50;
                 color: white;
-                border-radius: 20px; /* Rounded corners */
+                border-radius: 20px;
                 font-size: 20px;
                 padding: 10px 20px;
                 margin: 10px;
@@ -188,12 +188,12 @@ class SmartTaxAdvisor(QMainWindow):
         
         self.speech_btn = QPushButton("Speech Recognition")
         self.speech_btn.clicked.connect(self.select_speech_mode)
-        self.speech_btn.setFixedSize(250, 150) # Set fixed size for buttons
+        self.speech_btn.setFixedSize(250, 150)
         self.speech_btn.setStyleSheet("""
             QPushButton {
-                background-color: #008CBA; /* Blue */
+                background-color: #008CBA;
                 color: white;
-                border-radius: 20px; /* Rounded corners */
+                border-radius: 20px;
                 font-size: 20px;
                 padding: 10px 20px;
                 margin: 10px;
@@ -205,7 +205,7 @@ class SmartTaxAdvisor(QMainWindow):
         
         # Create horizontal layout for buttons
         button_layout = QHBoxLayout()
-        button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        button_layout.setAlignment(Qt.AlignCenter)
         button_layout.addWidget(self.sign_btn)
         button_layout.addWidget(self.speech_btn)
 
@@ -223,12 +223,12 @@ class SmartTaxAdvisor(QMainWindow):
         self.mic_indicator.hide()
         
         # Add widgets to layout
-        self.layout.addWidget(self.mode_label, alignment=Qt.AlignmentFlag.AlignCenter)
-        self.layout.addLayout(button_layout) # Add the horizontal layout for buttons
+        self.layout.addWidget(self.mode_label, alignment=Qt.AlignCenter)
+        self.layout.addLayout(button_layout)
         self.layout.addWidget(self.video_label)
         self.layout.addWidget(self.question_label)
         self.layout.addWidget(self.status_label)
-        self.layout.addWidget(self.mic_indicator, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.layout.addWidget(self.mic_indicator, alignment=Qt.AlignCenter)
         self.layout.addWidget(self.result_text)
         
         # Hide video and question widgets initially

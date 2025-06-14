@@ -7,7 +7,7 @@ def main():
     app = QApplication(sys.argv)
     window = SmartTaxAdvisor()
     window.show()
-    sys.exit(app.exec())
+    sys.exit(app.exec_())
 
 if __name__ == '__main__':
     main()
