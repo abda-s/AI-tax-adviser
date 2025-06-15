@@ -173,6 +173,7 @@ class SmartTaxAdvisor(QMainWindow):
         self.asking_digits = False
         self.is_listening = False
         self.is_capturing = False
+        self.asking_digit_count = False  # New state for asking number of digits
         
         # Confidence tracking
         self.current_confidence = 0.0
@@ -288,8 +289,6 @@ class SmartTaxAdvisor(QMainWindow):
         # Question and status labels
         self.question_label = QLabel()
         self.question_label.setStyleSheet("font-size: 16px;")
-        self.status_label = QLabel()
-        self.status_label.setStyleSheet("font-size: 12px; color: blue;")
         
         # Confidence display
         self.confidence_label = QLabel()
@@ -310,6 +309,21 @@ class SmartTaxAdvisor(QMainWindow):
             background-color: #e8f5e9;
             border-radius: 5px;
         """)
+        
+        # Number input feedback
+        self.number_feedback = QLabel()
+        self.number_feedback.setStyleSheet("""
+            font-size: 48px;
+            color: #2196F3;
+            padding: 20px;
+            background-color: #E3F2FD;
+            border-radius: 15px;
+            margin: 10px;
+            font-weight: bold;
+        """)
+        self.number_feedback.setAlignment(Qt.AlignCenter)
+        self.number_feedback.setMinimumHeight(100)
+        self.number_feedback.hide()
         
         # Answer display label
         self.answer_label = QLabel()
@@ -343,6 +357,7 @@ class SmartTaxAdvisor(QMainWindow):
         self.asl_layout.addWidget(self.question_label)
         self.asl_layout.addWidget(self.confidence_label)
         self.asl_layout.addWidget(self.feedback_label)
+        self.asl_layout.addWidget(self.number_feedback)
         self.asl_layout.addWidget(self.answer_label)
         
         # Add result text to results layout
@@ -450,12 +465,22 @@ class SmartTaxAdvisor(QMainWindow):
         
         if is_digit_question:
             if label.isdigit():
-                self.current_number += label
-                self.feedback_label.setText(f"Current number: {self.current_number}")
-                if len(self.current_number) == self.expected_digits:
-                    self.answers[self.current_q] = self.current_number
-                    self.asking_digits = False
-                    self.show_answer(self.current_number)
+                if self.asking_digit_count:
+                    # Handle digit count input
+                    self.expected_digits = int(label)
+                    self.asking_digit_count = False
+                    self.feedback_label.setText(f"Please enter {self.expected_digits} digits")
+                    self.number_feedback.setText("")
+                else:
+                    # Handle actual number input
+                    self.current_number += label
+                    self.feedback_label.setText(f"Detected digit: {label}")
+                    self.number_feedback.setText(self.current_number)
+                    self.number_feedback.show()
+                    if len(self.current_number) == self.expected_digits:
+                        self.answers[self.current_q] = self.current_number
+                        self.asking_digits = False
+                        self.show_answer(self.current_number)
         else:
             if label.upper() in ['Y', 'N']:
                 self.answers[self.current_q] = label.upper()
@@ -468,6 +493,7 @@ class SmartTaxAdvisor(QMainWindow):
         self.answer_label.show()
         self.feedback_label.setText("")
         self.confidence_label.setText("")
+        self.number_feedback.hide()
         self.answer_timer.start(2000)  # 2 seconds
     
     def show_next_question(self):
@@ -499,12 +525,16 @@ class SmartTaxAdvisor(QMainWindow):
             # Set up for digit input if it's a digits question or about children
             if question.get('type') == 'digits' or 'children' in question.get('text', '').lower():
                 self.asking_digits = True
-                self.expected_digits = question.get('digits', 1)
+                self.asking_digit_count = True  # Start by asking for number of digits
                 self.current_number = ""
                 self.hand_removed = True  # Start with hand removed state
-                self.feedback_label.setText("Please enter the number digit by digit")
+                self.feedback_label.setText("Please enter the number of digits")
+                self.number_feedback.setText("")
+                self.number_feedback.show()
             else:
                 self.asking_digits = False
+                self.asking_digit_count = False
+                self.number_feedback.hide()
             
             self.current_q += 1
         else:
