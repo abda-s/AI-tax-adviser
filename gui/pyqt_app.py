@@ -195,8 +195,9 @@ class SmartTaxAdvisor(QMainWindow):
         
         # Answer display timer
         self.answer_timer = QTimer()
-        self.answer_timer.timeout.connect(self.show_next_question)
         self.answer_timer.setSingleShot(True)
+        self.answer_timer.timeout.connect(self.show_next_question)
+        self.showing_answer = False
         
         # Create widgets
         self.setup_ui()
@@ -315,8 +316,8 @@ class SmartTaxAdvisor(QMainWindow):
         """)
         
         # Answer display label
-        self.answer_display = QLabel()
-        self.answer_display.setStyleSheet("""
+        self.answer_label = QLabel()
+        self.answer_label.setStyleSheet("""
             font-size: 24px;
             color: #2196F3;
             padding: 10px;
@@ -324,8 +325,8 @@ class SmartTaxAdvisor(QMainWindow):
             border-radius: 10px;
             margin: 10px;
         """)
-        self.answer_display.setAlignment(Qt.AlignCenter)
-        self.answer_display.hide()
+        self.answer_label.setAlignment(Qt.AlignCenter)
+        self.answer_label.hide()
         
         # Create microphone indicator
         self.mic_indicator = MicrophoneIndicator()
@@ -361,6 +362,9 @@ class SmartTaxAdvisor(QMainWindow):
     
     def process_sign_frame(self, frame):
         """Process frame for sign language detection"""
+        if self.showing_answer:
+            return frame
+            
         try:
             # Convert to RGB for MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -413,28 +417,18 @@ class SmartTaxAdvisor(QMainWindow):
                 self.show_answer(label.upper())
     
     def show_answer(self, answer):
-        """Display the answer for 2 seconds before moving to next question"""
-        # Show the answer
-        self.answer_display.setText(f"Answer: {answer}")
-        self.answer_display.show()
-        
-        # Hide other feedback
-        self.feedback_label.hide()
-        self.confidence_label.hide()
-        
-        # Start timer to show next question
-        self.answer_timer.start(2000)  # 2000 ms = 2 seconds
+        """Show the answer for 2 seconds before moving to next question"""
+        self.showing_answer = True
+        self.answer_label.setText(f"Answer: {answer}")
+        self.answer_label.show()
+        self.feedback_label.setText("")
+        self.confidence_label.setText("")
+        self.answer_timer.start(2000)  # 2 seconds
     
     def show_next_question(self):
-        """Handle transition to next question"""
-        # Hide answer display
-        self.answer_display.hide()
-        
-        # Show feedback elements again
-        self.feedback_label.show()
-        self.confidence_label.show()
-        
-        # Move to next question
+        """Move to the next question after showing the answer"""
+        self.showing_answer = False
+        self.answer_label.hide()
         self.ask_next()
     
     def select_sign_mode(self):
