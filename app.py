@@ -8,8 +8,8 @@ import signal
 import logging
 from PyQt5.QtWidgets import QApplication
 
-# Remove the eglfs platform setting to allow windowed mode
-# os.environ["QT_QPA_PLATFORM"] = "eglfs"
+# Set Qt platform to minimal for better compatibility
+os.environ["QT_QPA_PLATFORM"] = "minimal"
 
 def signal_handler(signum, frame):
     """Handle termination signals"""

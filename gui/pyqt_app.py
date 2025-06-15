@@ -128,8 +128,14 @@ class SmartTaxAdvisor(QMainWindow):
         self.control_queue = control_queue
         self.logger = logging.getLogger(__name__)
         
-        # Set window size for Raspberry Pi display
-        self.setGeometry(50, 50, 800, 600)
+        # Set window size and position
+        screen = QApplication.primaryScreen().geometry()
+        window_width = 800
+        window_height = 600
+        x = (screen.width() - window_width) // 2
+        y = (screen.height() - window_height) // 2
+        self.setGeometry(x, y, window_width, window_height)
+        
         self.setWindowTitle('Smart Tax Advisor')
         
         # Create central widget and layout
