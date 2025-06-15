@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QProgressBar
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor
 import cv2
@@ -172,6 +172,7 @@ class SmartTaxAdvisor(QMainWindow):
         self.asking_digits = False
         self.is_listening = False
         self.is_capturing = False
+        self.current_confidence = 0.0
         self.listening_dots = 0
         self.speech_thread = None
         
@@ -278,13 +279,39 @@ class SmartTaxAdvisor(QMainWindow):
         # Question and status labels
         self.question_label = QLabel()
         self.question_label.setStyleSheet("font-size: 16px;")
-        self.status_label = QLabel()
-        self.status_label.setStyleSheet("font-size: 12px; color: blue;")
+        
+        # Confidence indicator
+        self.confidence_bar = QProgressBar()
+        self.confidence_bar.setRange(0, 100)
+        self.confidence_bar.setValue(0)
+        self.confidence_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid grey;
+                border-radius: 5px;
+                text-align: center;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+            }
+        """)
+        
+        # Input feedback
+        self.input_feedback = QLabel()
+        self.input_feedback.setStyleSheet("font-size: 24px; font-weight: bold; color: #4CAF50;")
+        self.input_feedback.setAlignment(Qt.AlignCenter)
+        
+        # Digit requirement indicator
+        self.digit_requirement = QLabel()
+        self.digit_requirement.setStyleSheet("font-size: 16px; color: #666;")
+        self.digit_requirement.setAlignment(Qt.AlignCenter)
         
         # Add widgets to ASL layout
         self.asl_layout.addWidget(self.video_label)
         self.asl_layout.addWidget(self.question_label)
-        self.asl_layout.addWidget(self.status_label)
+        self.asl_layout.addWidget(self.confidence_bar)
+        self.asl_layout.addWidget(self.input_feedback)
+        self.asl_layout.addWidget(self.digit_requirement)
         
         # Result text
         self.result_text = QTextEdit()
@@ -334,6 +361,10 @@ class SmartTaxAdvisor(QMainWindow):
             else:
                 label, conf = self.asl.recognize_letter(frame)
             
+            # Update confidence bar
+            self.current_confidence = conf * 100
+            self.confidence_bar.setValue(int(self.current_confidence))
+            
             if label:
                 self.handle_sign_detection(label, conf)
             
@@ -348,13 +379,25 @@ class SmartTaxAdvisor(QMainWindow):
         if self.asking_digits:
             if label.isdigit():
                 self.current_number += label
+                self.input_feedback.setText(f"Current input: {self.current_number}")
                 if len(self.current_number) == self.expected_digits:
                     self.answers[self.current_q] = self.current_number
                     self.asking_digits = False
+                    self.input_feedback.setText("")
                     self.ask_next()
         else:
-            if label.upper() in ['Y', 'N']:
+            # Handle children question
+            if 'children' in QUESTIONS[self.current_q-1].get('text', '').lower():
+                if label.isdigit() and 1 <= int(label) <= 9:
+                    self.answers[self.current_q] = label
+                    self.input_feedback.setText(f"Number of children: {label}")
+                    QTimer.singleShot(1000, lambda: self.input_feedback.setText(""))
+                    self.ask_next()
+            # Handle Y/N questions
+            elif label.upper() in ['Y', 'N']:
                 self.answers[self.current_q] = label.upper()
+                self.input_feedback.setText(f"Selected: {label.upper()}")
+                QTimer.singleShot(1000, lambda: self.input_feedback.setText(""))
                 self.ask_next()
     
     def select_sign_mode(self):
@@ -377,12 +420,20 @@ class SmartTaxAdvisor(QMainWindow):
             question = QUESTIONS[self.current_q]
             self.question_label.setText(question['text'])
             
-            if question.get('type') == 'digits':
+            # Check if this is a children question
+            if 'children' in question.get('text', '').lower():
+                self.asking_digits = False
+                self.digit_requirement.hide()
+                self.input_feedback.setText("Show number of children (1-9)")
+            elif question.get('type') == 'digits':
                 self.asking_digits = True
                 self.expected_digits = question.get('digits', 1)
                 self.current_number = ""
+                self.digit_requirement.setText(f"Please enter {self.expected_digits} digit{'s' if self.expected_digits > 1 else ''}")
+                self.digit_requirement.show()
             else:
                 self.asking_digits = False
+                self.digit_requirement.hide()
             
             self.current_q += 1
         else:
@@ -402,15 +453,15 @@ class SmartTaxAdvisor(QMainWindow):
         if self.selected_mode == 'speech' and self.is_listening:
             self.listening_dots = (self.listening_dots + 1) % 4
             dots = "." * self.listening_dots
-            self.status_label.setText(f"Listening{dots}")
-            self.status_label.setStyleSheet("font-size: 12px; color: green; font-weight: bold;")
+            self.input_feedback.setText(f"Listening{dots}")
+            self.input_feedback.setStyleSheet("font-size: 12px; color: green; font-weight: bold;")
         elif self.selected_mode == 'speech':
-            self.status_label.setText("Not Listening")
-            self.status_label.setStyleSheet("font-size: 12px; color: gray;")
+            self.input_feedback.setText("Not Listening")
+            self.input_feedback.setStyleSheet("font-size: 12px; color: gray;")
 
     def update_status(self, message, color='blue'):
-        self.status_label.setText(message)
-        self.status_label.setStyleSheet(f"font-size: 12px; color: {color};")
+        self.input_feedback.setText(message)
+        self.input_feedback.setStyleSheet(f"font-size: 12px; color: {color};")
 
     def process_speech_result(self, raw):
         """Process the speech recognition result"""
