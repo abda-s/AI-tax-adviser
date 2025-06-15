@@ -126,10 +126,26 @@ class MicrophoneIndicator(QLabel):
         self.update()
 
 class SmartTaxAdvisor(QMainWindow):
-    def __init__(self):
+    def __init__(self, frame_queue=None, control_queue=None):
         super().__init__()
+        self.frame_queue = frame_queue
+        self.control_queue = control_queue
+        self.logger = logging.getLogger(__name__)
+        
+        # Set window flags for Raspberry Pi
+        if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
+            self.setWindowFlags(Qt.FramelessWindowHint)
+            # Set fixed size for Raspberry Pi display
+            self.setFixedSize(800, 600)
+            # Center the window on screen
+            screen = QApplication.primaryScreen().geometry()
+            x = (screen.width() - self.width()) // 2
+            y = (screen.height() - self.height()) // 2
+            self.move(x, y)
+        else:
+            self.setGeometry(100, 100, 800, 600)
+        
         self.setWindowTitle('Smart Tax Advisor')
-        self.setGeometry(100, 100, 800, 600)
         
         # Create central widget and layout
         central_widget = QWidget()
@@ -277,6 +293,16 @@ class SmartTaxAdvisor(QMainWindow):
         # Set initial status for speech mode
         self.update_status("Not Listening", "gray")
         self.mic_indicator.set_listening(False)
+
+        # Add escape key handler for fullscreen mode
+        if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
+            QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == event.KeyPress and event.key() == Qt.Key_Escape:
+            self.close()
+            return True
+        return super().eventFilter(obj, event)
 
     def update_listening_animation(self):
         """Update the listening animation dots"""
