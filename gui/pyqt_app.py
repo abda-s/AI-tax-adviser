@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QProgressBar
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QFont
 import cv2
 from PIL import Image
 from config.config import load_config
@@ -172,15 +172,8 @@ class SmartTaxAdvisor(QMainWindow):
         self.asking_digits = False
         self.is_listening = False
         self.is_capturing = False
-        self.current_confidence = 0.0
-        self.listening_dots = 0
-        self.speech_thread = None
-        self.yn_stable_label = None
-        self.yn_stable_conf = 0.0
-        self.yn_stable_count = 0
-        self.yn_last_label = None
-        self.yn_confirming = False
-        self.yn_feedback_timer = None
+        self.last_confidence = 0.0
+        self.last_detected = ""
         
         # Debounce settings
         self.FRAME_BUFFER = 5
@@ -286,28 +279,50 @@ class SmartTaxAdvisor(QMainWindow):
         self.question_label = QLabel()
         self.question_label.setStyleSheet("font-size: 16px;")
         
-        # Input feedback
-        self.input_feedback = QLabel()
-        self.input_feedback.setStyleSheet("font-size: 24px; font-weight: bold; color: #4CAF50;")
-        self.input_feedback.setAlignment(Qt.AlignCenter)
+        # Progress indicator
+        self.progress_label = QLabel()
+        self.progress_label.setStyleSheet("font-size: 14px; color: #666;")
         
-        self.digit_requirement = QLabel()
-        self.digit_requirement.setStyleSheet("font-size: 16px; color: #666;")
-        self.digit_requirement.setAlignment(Qt.AlignCenter)
+        # Confidence bar
+        self.confidence_bar = QProgressBar()
+        self.confidence_bar.setRange(0, 100)
+        self.confidence_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid grey;
+                border-radius: 5px;
+                text-align: center;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+            }
+        """)
         
-        # Add widgets to ASL layout
-        self.asl_layout.addWidget(self.video_label)
-        self.asl_layout.addWidget(self.question_label)
-        self.asl_layout.addWidget(self.input_feedback)
-        self.asl_layout.addWidget(self.digit_requirement)
-        
-        # Result text
-        self.result_text = QTextEdit()
-        self.result_text.setReadOnly(True)
+        # Current input display
+        self.input_display = QLabel()
+        self.input_display.setStyleSheet("""
+            font-size: 24px;
+            font-weight: bold;
+            color: #4CAF50;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        """)
         
         # Create microphone indicator
         self.mic_indicator = MicrophoneIndicator()
         self.mic_indicator.hide()
+        
+        # Add widgets to ASL layout
+        self.asl_layout.addWidget(self.video_label)
+        self.asl_layout.addWidget(self.question_label)
+        self.asl_layout.addWidget(self.progress_label)
+        self.asl_layout.addWidget(self.confidence_bar)
+        self.asl_layout.addWidget(self.input_display)
+        
+        # Result text
+        self.result_text = QTextEdit()
+        self.result_text.setReadOnly(True)
         
         # Add mode widgets to main layout
         self.layout.addWidget(self.mode_selection_widget)
@@ -318,17 +333,6 @@ class SmartTaxAdvisor(QMainWindow):
         # Initially hide ASL widget and result text
         self.asl_widget.hide()
         self.result_text.hide()
-
-        self.yn_expected_label = QLabel()
-        self.yn_expected_label.setStyleSheet("font-size: 20px; color: red; font-weight: bold;")
-        self.yn_expected_label.setAlignment(Qt.AlignCenter)
-        self.yn_prediction_label = QLabel()
-        self.yn_prediction_label.setStyleSheet("font-size: 20px; color: green; font-weight: bold;")
-        self.yn_prediction_label.setAlignment(Qt.AlignCenter)
-        self.asl_layout.insertWidget(1, self.yn_expected_label)
-        self.asl_layout.insertWidget(2, self.yn_prediction_label)
-        self.yn_expected_label.hide()
-        self.yn_prediction_label.hide()
 
     def process_frame(self):
         """Process frames from the camera queue"""
@@ -351,33 +355,27 @@ class SmartTaxAdvisor(QMainWindow):
     def process_sign_frame(self, frame):
         """Process frame for sign language detection"""
         try:
+            # Convert to RGB for MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            question = QUESTIONS[self.current_q-1] if self.current_q > 0 else {}
-            if question.get('type') == 'yn':
-                label, conf = self.asl.recognize_letter(frame)
-                conf_pct = conf * 100
-                if label and label.upper() in ['Y', 'N']:
-                    self.yn_prediction_label.setText(f"{label.upper()} ({conf_pct:.1f}%)")
-                else:
-                    self.yn_prediction_label.setText("No prediction")
-                # Stable detection logic
-                if conf_pct >= 75 and label.upper() in ['Y', 'N']:
-                    if label == self.yn_last_label:
-                        self.yn_stable_count += 1
-                    else:
-                        self.yn_stable_count = 1
-                        self.yn_last_label = label
-                    if self.yn_stable_count >= 9 and not self.yn_confirming:  # ~0.3s at 30 FPS
-                        self.yn_confirming = True
-                        self.yn_prediction_label.setText(f"Selected: {label.upper()}")
-                        QTimer.singleShot(500, lambda: self._finalize_yn_answer(label))
-                else:
-                    self.yn_stable_count = 0
-                    self.yn_last_label = label
+            
+            # Process with ASL detector
+            if self.asking_digits:
+                label, conf = self.asl.recognize_digit(frame)
             else:
-                # For digits/children, keep MediaPipe skeleton overlay
-                # If your ASLDetector draws on the frame, it will remain
-                pass
+                label, conf = self.asl.recognize_letter(frame)
+            
+            # Update confidence bar
+            self.last_confidence = conf * 100
+            self.confidence_bar.setValue(int(self.last_confidence))
+            
+            if label:
+                self.last_detected = label
+                if self.asking_digits:
+                    self.input_display.setText(f"Current: {self.current_number}{label}")
+                else:
+                    self.input_display.setText(f"Detected: {label}")
+                self.handle_sign_detection(label, conf)
+            
             return frame
             
         except Exception as e:
@@ -389,25 +387,13 @@ class SmartTaxAdvisor(QMainWindow):
         if self.asking_digits:
             if label.isdigit():
                 self.current_number += label
-                self.input_feedback.setText(f"Current input: {self.current_number}")
                 if len(self.current_number) == self.expected_digits:
                     self.answers[self.current_q] = self.current_number
                     self.asking_digits = False
-                    self.input_feedback.setText("")
                     self.ask_next()
         else:
-            # Handle children question
-            if 'children' in QUESTIONS[self.current_q-1].get('text', '').lower():
-                if label.isdigit() and 1 <= int(label) <= 9:
-                    self.answers[self.current_q] = label
-                    self.input_feedback.setText(f"Number of children: {label}")
-                    QTimer.singleShot(1000, lambda: self.input_feedback.setText(""))
-                    self.ask_next()
-            # Handle Y/N questions
-            elif label.upper() in ['Y', 'N']:
+            if label.upper() in ['Y', 'N']:
                 self.answers[self.current_q] = label.upper()
-                self.input_feedback.setText(f"Selected: {label.upper()}")
-                QTimer.singleShot(1000, lambda: self.input_feedback.setText(""))
                 self.ask_next()
     
     def select_sign_mode(self):
@@ -430,34 +416,19 @@ class SmartTaxAdvisor(QMainWindow):
             question = QUESTIONS[self.current_q]
             self.question_label.setText(question['text'])
             
-            # Check if this is a children question
-            if 'children' in question.get('text', '').lower():
-                self.asking_digits = False
-                self.digit_requirement.hide()
-                self.input_feedback.setText("Show number of children (1-9)")
-            elif question.get('type') == 'digits':
+            # Update progress
+            self.progress_label.setText(f"Question {self.current_q + 1} of {len(QUESTIONS)}")
+            
+            if question.get('type') == 'digits':
                 self.asking_digits = True
                 self.expected_digits = question.get('digits', 1)
                 self.current_number = ""
-                self.digit_requirement.setText(f"Please enter {self.expected_digits} digit{'s' if self.expected_digits > 1 else ''}")
-                self.digit_requirement.show()
-            elif question.get('type') == 'yn':
-                self.yn_expected_label.setText("Show Y or N sign")
-                self.yn_expected_label.show()
-                self.yn_prediction_label.setText("No prediction")
-                self.yn_prediction_label.show()
-                self.yn_stable_label = None
-                self.yn_stable_conf = 0.0
-                self.yn_stable_count = 0
-                self.yn_last_label = None
-                self.yn_confirming = False
+                self.input_display.setText(f"Enter {self.expected_digits} digit(s)")
             else:
                 self.asking_digits = False
-                self.digit_requirement.hide()
+                self.input_display.setText("Show Y or N")
             
             self.current_q += 1
-            self.yn_expected_label.hide()
-            self.yn_prediction_label.hide()
         else:
             self.finish()
     
@@ -475,15 +446,15 @@ class SmartTaxAdvisor(QMainWindow):
         if self.selected_mode == 'speech' and self.is_listening:
             self.listening_dots = (self.listening_dots + 1) % 4
             dots = "." * self.listening_dots
-            self.input_feedback.setText(f"Listening{dots}")
-            self.input_feedback.setStyleSheet("font-size: 12px; color: green; font-weight: bold;")
+            self.status_label.setText(f"Listening{dots}")
+            self.status_label.setStyleSheet("font-size: 12px; color: green; font-weight: bold;")
         elif self.selected_mode == 'speech':
-            self.input_feedback.setText("Not Listening")
-            self.input_feedback.setStyleSheet("font-size: 12px; color: gray;")
+            self.status_label.setText("Not Listening")
+            self.status_label.setStyleSheet("font-size: 12px; color: gray;")
 
     def update_status(self, message, color='blue'):
-        self.input_feedback.setText(message)
-        self.input_feedback.setStyleSheet(f"font-size: 12px; color: {color};")
+        self.status_label.setText(message)
+        self.status_label.setStyleSheet(f"font-size: 12px; color: {color};")
 
     def process_speech_result(self, raw):
         """Process the speech recognition result"""
@@ -539,11 +510,6 @@ class SmartTaxAdvisor(QMainWindow):
         self.speech_thread.finished.connect(self.process_speech_result)
         self.speech_thread.error.connect(self.handle_speech_error)
         self.speech_thread.start()
-
-    def _finalize_yn_answer(self, label):
-        self.answers[self.current_q] = label.upper()
-        self.yn_confirming = False
-        self.ask_next()
 
 def main():
     app = QApplication(sys.argv)
