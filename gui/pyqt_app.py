@@ -356,7 +356,10 @@ class SmartTaxAdvisor(QMainWindow):
             if question.get('type') == 'yn':
                 label, conf = self.asl.recognize_letter(frame)
                 conf_pct = conf * 100
-                self.yn_prediction_label.setText(f"{label.upper()} ({conf_pct:.1f}%)")
+                if label and label.upper() in ['Y', 'N']:
+                    self.yn_prediction_label.setText(f"{label.upper()} ({conf_pct:.1f}%)")
+                else:
+                    self.yn_prediction_label.setText("No prediction")
                 # Stable detection logic
                 if conf_pct >= 75 and label.upper() in ['Y', 'N']:
                     if label == self.yn_last_label:
@@ -441,6 +444,7 @@ class SmartTaxAdvisor(QMainWindow):
             elif question.get('type') == 'yn':
                 self.yn_expected_label.setText("Show Y or N sign")
                 self.yn_expected_label.show()
+                self.yn_prediction_label.setText("No prediction")
                 self.yn_prediction_label.show()
                 self.yn_stable_label = None
                 self.yn_stable_conf = 0.0
@@ -452,6 +456,8 @@ class SmartTaxAdvisor(QMainWindow):
                 self.digit_requirement.hide()
             
             self.current_q += 1
+            self.yn_expected_label.hide()
+            self.yn_prediction_label.hide()
         else:
             self.finish()
     
