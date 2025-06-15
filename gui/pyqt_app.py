@@ -524,8 +524,14 @@ class SmartTaxAdvisor(QMainWindow):
         # Process the answer
         self.process_answer(number)
         
-        # Reset state
+        # Start timer to show next question
+        self.answer_timer.start(2000)  # 2 seconds
+        
+    def show_next_question(self):
+        """Move to the next question after showing the answer"""
+        self.answer_label.hide()
         self.reset_digit_state()
+        self.ask_next()
         
     def reset_digit_state(self):
         """Reset all digit-related state variables"""
@@ -538,6 +544,25 @@ class SmartTaxAdvisor(QMainWindow):
         self.feedback_label.setText("")
         self.confidence_label.setText("")
         self.answer_label.hide()
+        
+    def process_answer(self, answer):
+        """Process the answer and store it"""
+        if self.current_question_index > 0:
+            question_index = self.current_question_index - 1
+            self.answers[question_index] = answer
+        
+    def show_results(self):
+        """Show final results"""
+        self.asl_widget.hide()
+        self.results_widget.show()
+        
+        # Format results
+        result_text = "Tax Assessment Results:\n\n"
+        for i, question in enumerate(self.questions):
+            result_text += f"Q: {question['text']}\n"
+            result_text += f"A: {self.answers.get(i, 'No answer')}\n\n"
+            
+        self.result_text.setText(result_text)
         
     def ask_next(self):
         """Ask the next question"""
