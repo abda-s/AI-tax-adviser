@@ -392,8 +392,16 @@ class SmartTaxAdvisor(QMainWindow):
             # Convert to RGB for MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # Process with ASL detector
-            if self.asking_digits:
+            # Determine which model to use based on the current question
+            current_question = QUESTIONS[self.current_q - 1] if self.current_q > 0 else None
+            use_digit_model = (
+                current_question and 
+                (current_question.get('type') == 'digits' or 
+                 'children' in current_question.get('text', '').lower())
+            )
+            
+            # Process with appropriate detector
+            if use_digit_model:
                 label, conf = self.asl.recognize_digit(frame)
             else:
                 label, conf = self.asl.recognize_letter(frame)
@@ -427,7 +435,14 @@ class SmartTaxAdvisor(QMainWindow):
     
     def handle_sign_detection(self, label, confidence):
         """Handle detected sign language input"""
-        if self.asking_digits:
+        current_question = QUESTIONS[self.current_q - 1] if self.current_q > 0 else None
+        is_digit_question = (
+            current_question and 
+            (current_question.get('type') == 'digits' or 
+             'children' in current_question.get('text', '').lower())
+        )
+        
+        if is_digit_question:
             if label.isdigit():
                 self.current_number += label
                 if len(self.current_number) == self.expected_digits:
@@ -474,7 +489,8 @@ class SmartTaxAdvisor(QMainWindow):
             question = QUESTIONS[self.current_q]
             self.question_label.setText(question['text'])
             
-            if question.get('type') == 'digits':
+            # Set up for digit input if it's a digits question or about children
+            if question.get('type') == 'digits' or 'children' in question.get('text', '').lower():
                 self.asking_digits = True
                 self.expected_digits = question.get('digits', 1)
                 self.current_number = ""
