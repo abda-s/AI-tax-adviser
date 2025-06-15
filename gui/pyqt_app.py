@@ -216,6 +216,24 @@ class SmartTaxAdvisor(QMainWindow):
         if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
             QApplication.instance().installEventFilter(self)
 
+        # Initialize MediaPipe
+        self.mp_hands = mp.solutions.hands
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        
+        # Initialize ASL detector
+        self.asl_detector = ASLDetector()
+        
+        # Set up speech recognition
+        self.speech_thread = SpeechRecognitionThread(self.sr)
+        self.speech_thread.finished.connect(self.process_speech_result)
+        self.speech_thread.error.connect(self.handle_speech_error)
+
     def eventFilter(self, obj, event):
         if event.type() == event.KeyPress and event.key() == Qt.Key_Escape:
             self.close()
@@ -405,13 +423,13 @@ class SmartTaxAdvisor(QMainWindow):
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
         # Process with MediaPipe
-        results = self.mp_hands.process(rgb_frame)
+        results = self.hands.process(rgb_frame)
         
         # Draw hand landmarks
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
                 self.mp_drawing.draw_landmarks(
-                    frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+                    frame, hand_landmarks, self.hands.HAND_CONNECTIONS)
             
             # Get hand position
             hand_landmarks = results.multi_hand_landmarks[0]
@@ -666,9 +684,6 @@ class SmartTaxAdvisor(QMainWindow):
         self.mic_indicator.set_listening(True)  # Start microphone animation
         
         # Create and start speech recognition thread
-        self.speech_thread = SpeechRecognitionThread(self.sr)
-        self.speech_thread.finished.connect(self.process_speech_result)
-        self.speech_thread.error.connect(self.handle_speech_error)
         self.speech_thread.start()
 
     def select_sign_mode(self):
