@@ -175,6 +175,22 @@ class SmartTaxAdvisor(QMainWindow):
         self.current_confidence = 0.0
         self.listening_dots = 0
         self.speech_thread = None
+        self.yn_stable_label = None
+        self.yn_stable_conf = 0.0
+        self.yn_stable_count = 0
+        self.yn_last_label = None
+        self.yn_confirming = False
+        self.yn_feedback_timer = None
+        self.digit_stage = 'select_count'  # 'select_count' or 'enter_digits'
+        self.digit_count = 0
+        self.digit_entered = []
+        self.digit_stable_label = None
+        self.digit_stable_conf = 0.0
+        self.digit_stable_count = 0
+        self.digit_last_label = None
+        self.digit_confirming = False
+        self.digit_hand_present = False
+        self.digit_feedback_timer = None
         
         # Debounce settings
         self.FRAME_BUFFER = 5
@@ -331,6 +347,17 @@ class SmartTaxAdvisor(QMainWindow):
         self.asl_widget.hide()
         self.result_text.hide()
 
+        self.yn_expected_label = QLabel()
+        self.yn_expected_label.setStyleSheet("font-size: 20px; color: red; font-weight: bold;")
+        self.yn_expected_label.setAlignment(Qt.AlignCenter)
+        self.yn_prediction_label = QLabel()
+        self.yn_prediction_label.setStyleSheet("font-size: 20px; color: green; font-weight: bold;")
+        self.yn_prediction_label.setAlignment(Qt.AlignCenter)
+        self.asl_layout.insertWidget(1, self.yn_expected_label)
+        self.asl_layout.insertWidget(2, self.yn_prediction_label)
+        self.yn_expected_label.hide()
+        self.yn_prediction_label.hide()
+
     def process_frame(self):
         """Process frames from the camera queue"""
         if not self.frame_queue.empty():
@@ -426,11 +453,27 @@ class SmartTaxAdvisor(QMainWindow):
                 self.digit_requirement.hide()
                 self.input_feedback.setText("Show number of children (1-9)")
             elif question.get('type') == 'digits':
-                self.asking_digits = True
-                self.expected_digits = question.get('digits', 1)
-                self.current_number = ""
-                self.digit_requirement.setText(f"Please enter {self.expected_digits} digit{'s' if self.expected_digits > 1 else ''}")
+                self.digit_stage = 'select_count'
+                self.digit_count = 0
+                self.digit_entered = []
+                self.digit_stable_label = None
+                self.digit_stable_conf = 0.0
+                self.digit_stable_count = 0
+                self.digit_last_label = None
+                self.digit_confirming = False
+                self.digit_hand_present = False
+                self.digit_requirement.setText("Show number of digits (1-5)")
                 self.digit_requirement.show()
+                self.input_feedback.setText("")
+            elif question.get('type') == 'yn':
+                self.yn_expected_label.setText("Show Y or N sign")
+                self.yn_expected_label.show()
+                self.yn_prediction_label.show()
+                self.yn_stable_label = None
+                self.yn_stable_conf = 0.0
+                self.yn_stable_count = 0
+                self.yn_last_label = None
+                self.yn_confirming = False
             else:
                 self.asking_digits = False
                 self.digit_requirement.hide()
@@ -517,6 +560,116 @@ class SmartTaxAdvisor(QMainWindow):
         self.speech_thread.finished.connect(self.process_speech_result)
         self.speech_thread.error.connect(self.handle_speech_error)
         self.speech_thread.start()
+
+    def process_sign_frame(self, frame):
+        try:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            question = QUESTIONS[self.current_q-1] if self.current_q > 0 else {}
+            if question.get('type') == 'digits':
+                # Step 1: Select number of digits
+                if self.digit_stage == 'select_count':
+                    label, conf = self.asl.recognize_digit(frame)
+                    conf_pct = conf * 100
+                    if label.isdigit() and 1 <= int(label) <= 5:
+                        self.input_feedback.setText(f"Current: {label} ({conf_pct:.1f}%)")
+                        if conf_pct >= 75:
+                            if label == self.digit_last_label:
+                                self.digit_stable_count += 1
+                            else:
+                                self.digit_stable_count = 1
+                                self.digit_last_label = label
+                            if self.digit_stable_count >= 9 and not self.digit_confirming:
+                                self.digit_confirming = True
+                                self.input_feedback.setText(f"Selected: {label}")
+                                QTimer.singleShot(500, lambda: self._finalize_digit_count(int(label)))
+                        else:
+                            self.digit_stable_count = 0
+                            self.digit_last_label = label
+                    else:
+                        self.input_feedback.setText("")
+                        self.digit_stable_count = 0
+                        self.digit_last_label = None
+                # Step 2: Enter digits one by one
+                elif self.digit_stage == 'enter_digits':
+                    label, conf = self.asl.recognize_digit(frame)
+                    conf_pct = conf * 100
+                    # Detect if hand is present
+                    hand_present = label.isdigit()
+                    if hand_present:
+                        self.input_feedback.setText(f"Current: {label} ({conf_pct:.1f}%) | Number: {''.join(self.digit_entered)}")
+                        if conf_pct >= 75:
+                            if label == self.digit_last_label:
+                                self.digit_stable_count += 1
+                            else:
+                                self.digit_stable_count = 1
+                                self.digit_last_label = label
+                            if self.digit_stable_count >= 9 and not self.digit_confirming and not self.digit_hand_present:
+                                self.digit_confirming = True
+                                self.digit_hand_present = True
+                                self.input_feedback.setText(f"Selected: {label}")
+                                QTimer.singleShot(500, lambda: self._finalize_digit_entry(label))
+                        else:
+                            self.digit_stable_count = 0
+                            self.digit_last_label = label
+                    else:
+                        # Hand removed, allow next digit
+                        self.digit_hand_present = False
+                        self.digit_stable_count = 0
+                        self.digit_last_label = None
+                        self.input_feedback.setText(f"Number: {''.join(self.digit_entered)}")
+                return frame
+            elif question.get('type') == 'yn':
+                label, conf = self.asl.recognize_letter(frame)
+                conf_pct = conf * 100
+                self.yn_prediction_label.setText(f"{label.upper()} ({conf_pct:.1f}%)")
+                # Stable detection logic
+                if conf_pct >= 75 and label.upper() in ['Y', 'N']:
+                    if label == self.yn_last_label:
+                        self.yn_stable_count += 1
+                    else:
+                        self.yn_stable_count = 1
+                        self.yn_last_label = label
+                    if self.yn_stable_count >= 9 and not self.yn_confirming:  # ~0.3s at 30 FPS
+                        self.yn_confirming = True
+                        self.yn_prediction_label.setText(f"Selected: {label.upper()}")
+                        QTimer.singleShot(500, lambda: self._finalize_yn_answer(label))
+                else:
+                    self.yn_stable_count = 0
+                    self.yn_last_label = label
+            else:
+                # ... existing code for digits/children ...
+                pass
+            return frame
+        except Exception as e:
+            self.logger.error(f"Error processing sign frame: {e}")
+            return frame
+
+    def _finalize_digit_count(self, count):
+        self.digit_count = count
+        self.digit_stage = 'enter_digits'
+        self.digit_confirming = False
+        self.input_feedback.setText(f"Enter {count} digit{'s' if count > 1 else ''}")
+        self.digit_entered = []
+        self.digit_hand_present = False
+        self.digit_stable_count = 0
+        self.digit_last_label = None
+
+    def _finalize_digit_entry(self, digit):
+        self.digit_entered.append(digit)
+        self.digit_confirming = False
+        self.input_feedback.setText(f"Number: {''.join(self.digit_entered)}")
+        if len(self.digit_entered) == self.digit_count:
+            self.answers[self.current_q] = ''.join(self.digit_entered)
+            QTimer.singleShot(500, self.ask_next)
+        # Wait for hand removal before next digit
+        self.digit_hand_present = True
+        self.digit_stable_count = 0
+        self.digit_last_label = None
+
+    def _finalize_yn_answer(self, label):
+        self.answers[self.current_q] = label.upper()
+        self.yn_confirming = False
+        self.ask_next()
 
 def main():
     app = QApplication(sys.argv)
