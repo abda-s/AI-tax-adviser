@@ -215,6 +215,13 @@ class SmartTaxAdvisor(QMainWindow):
         return super().eventFilter(obj, event)
 
     def setup_ui(self):
+        # Create container widgets for different modes
+        self.mode_selection_widget = QWidget()
+        self.mode_selection_layout = QVBoxLayout(self.mode_selection_widget)
+        
+        self.asl_widget = QWidget()
+        self.asl_layout = QVBoxLayout(self.asl_widget)
+        
         # Mode selection
         self.mode_label = QLabel("Select Input Mode:")
         self.mode_label.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px;")
@@ -260,15 +267,26 @@ class SmartTaxAdvisor(QMainWindow):
         button_layout.addWidget(self.sign_btn)
         button_layout.addWidget(self.speech_btn)
         
+        # Add widgets to mode selection layout
+        self.mode_selection_layout.addWidget(self.mode_label)
+        self.mode_selection_layout.addLayout(button_layout)
+        
         # Video display
         self.video_label = QLabel()
         self.video_label.setMinimumSize(640, 480)
         
-        # Other UI elements
+        # Question and status labels
         self.question_label = QLabel()
         self.question_label.setStyleSheet("font-size: 16px;")
         self.status_label = QLabel()
         self.status_label.setStyleSheet("font-size: 12px; color: blue;")
+        
+        # Add widgets to ASL layout
+        self.asl_layout.addWidget(self.video_label)
+        self.asl_layout.addWidget(self.question_label)
+        self.asl_layout.addWidget(self.status_label)
+        
+        # Result text
         self.result_text = QTextEdit()
         self.result_text.setReadOnly(True)
         
@@ -276,19 +294,14 @@ class SmartTaxAdvisor(QMainWindow):
         self.mic_indicator = MicrophoneIndicator()
         self.mic_indicator.hide()
         
-        # Add widgets to layout
-        self.layout.addWidget(self.mode_label)
-        self.layout.addLayout(button_layout)
-        self.layout.addWidget(self.video_label)
-        self.layout.addWidget(self.question_label)
-        self.layout.addWidget(self.status_label)
+        # Add mode widgets to main layout
+        self.layout.addWidget(self.mode_selection_widget)
+        self.layout.addWidget(self.asl_widget)
         self.layout.addWidget(self.mic_indicator, alignment=Qt.AlignCenter)
         self.layout.addWidget(self.result_text)
         
-        # Hide video and question widgets initially
-        self.video_label.hide()
-        self.question_label.hide()
-        self.status_label.hide()
+        # Initially hide ASL widget and result text
+        self.asl_widget.hide()
         self.result_text.hide()
 
     def process_frame(self):
@@ -347,17 +360,15 @@ class SmartTaxAdvisor(QMainWindow):
     def select_sign_mode(self):
         """Handle sign language mode selection"""
         self.selected_mode = "sign"
-        self.video_label.show()
-        self.question_label.show()
-        self.status_label.show()
+        self.mode_selection_widget.hide()
+        self.asl_widget.show()
         self.ask_next()
     
     def select_speech_mode(self):
         """Handle speech mode selection"""
         self.selected_mode = "speech"
-        self.video_label.show()
-        self.question_label.show()
-        self.status_label.show()
+        self.mode_selection_widget.hide()
+        self.asl_widget.show()
         self.ask_next()
     
     def ask_next(self):
@@ -379,9 +390,7 @@ class SmartTaxAdvisor(QMainWindow):
     
     def finish(self):
         """Handle completion of questions"""
-        self.video_label.hide()
-        self.question_label.hide()
-        self.status_label.hide()
+        self.asl_widget.hide()
         
         # Process answers and display results
         result = self.engine.process_answers(self.answers)
