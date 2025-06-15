@@ -8,8 +8,8 @@ import signal
 import logging
 from PyQt5.QtWidgets import QApplication
 
-# Set Qt platform for Raspberry Pi
-os.environ["QT_QPA_PLATFORM"] = "eglfs"
+# Remove the eglfs platform setting to allow windowed mode
+# os.environ["QT_QPA_PLATFORM"] = "eglfs"
 
 def signal_handler(signum, frame):
     """Handle termination signals"""
