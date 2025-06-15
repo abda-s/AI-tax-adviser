@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QProgressBar
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor, QFont
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor
 import cv2
 from PIL import Image
 from config.config import load_config
@@ -18,6 +18,7 @@ import numpy as np
 import mediapipe as mp
 import logging
 import os
+import time
 
 class SpeechRecognitionThread(QThread):
     finished = pyqtSignal(str)
@@ -172,8 +173,15 @@ class SmartTaxAdvisor(QMainWindow):
         self.asking_digits = False
         self.is_listening = False
         self.is_capturing = False
-        self.last_confidence = 0.0
-        self.last_detected = ""
+        self.listening_dots = 0
+        self.speech_thread = None
+        
+        # Confidence tracking
+        self.current_confidence = 0.0
+        self.confidence_start_time = None
+        self.confidence_threshold = 0.75
+        self.confidence_duration = 0.3  # seconds
+        self.last_detected_label = None
         
         # Debounce settings
         self.FRAME_BUFFER = 5
@@ -278,51 +286,43 @@ class SmartTaxAdvisor(QMainWindow):
         # Question and status labels
         self.question_label = QLabel()
         self.question_label.setStyleSheet("font-size: 16px;")
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet("font-size: 12px; color: blue;")
         
-        # Progress indicator
-        self.progress_label = QLabel()
-        self.progress_label.setStyleSheet("font-size: 14px; color: #666;")
-        
-        # Confidence bar
-        self.confidence_bar = QProgressBar()
-        self.confidence_bar.setRange(0, 100)
-        self.confidence_bar.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid grey;
-                border-radius: 5px;
-                text-align: center;
-                height: 20px;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-            }
-        """)
-        
-        # Current input display
-        self.input_display = QLabel()
-        self.input_display.setStyleSheet("""
-            font-size: 24px;
-            font-weight: bold;
-            color: #4CAF50;
-            padding: 10px;
+        # Confidence display
+        self.confidence_label = QLabel()
+        self.confidence_label.setStyleSheet("""
+            font-size: 14px;
+            color: #666;
+            padding: 5px;
             background-color: #f0f0f0;
             border-radius: 5px;
         """)
         
-        # Create microphone indicator
-        self.mic_indicator = MicrophoneIndicator()
-        self.mic_indicator.hide()
+        # Feedback label
+        self.feedback_label = QLabel()
+        self.feedback_label.setStyleSheet("""
+            font-size: 16px;
+            color: #4CAF50;
+            padding: 5px;
+            background-color: #e8f5e9;
+            border-radius: 5px;
+        """)
         
         # Add widgets to ASL layout
         self.asl_layout.addWidget(self.video_label)
         self.asl_layout.addWidget(self.question_label)
-        self.asl_layout.addWidget(self.progress_label)
-        self.asl_layout.addWidget(self.confidence_bar)
-        self.asl_layout.addWidget(self.input_display)
+        self.asl_layout.addWidget(self.status_label)
+        self.asl_layout.addWidget(self.confidence_label)
+        self.asl_layout.addWidget(self.feedback_label)
         
         # Result text
         self.result_text = QTextEdit()
         self.result_text.setReadOnly(True)
+        
+        # Create microphone indicator
+        self.mic_indicator = MicrophoneIndicator()
+        self.mic_indicator.hide()
         
         # Add mode widgets to main layout
         self.layout.addWidget(self.mode_selection_widget)
@@ -364,17 +364,26 @@ class SmartTaxAdvisor(QMainWindow):
             else:
                 label, conf = self.asl.recognize_letter(frame)
             
-            # Update confidence bar
-            self.last_confidence = conf * 100
-            self.confidence_bar.setValue(int(self.last_confidence))
+            # Update confidence display
+            self.current_confidence = conf
+            self.confidence_label.setText(f"Confidence: {conf:.2%}")
             
-            if label:
-                self.last_detected = label
-                if self.asking_digits:
-                    self.input_display.setText(f"Current: {self.current_number}{label}")
-                else:
-                    self.input_display.setText(f"Detected: {label}")
-                self.handle_sign_detection(label, conf)
+            # Handle confidence threshold and timing
+            if conf >= self.confidence_threshold:
+                if self.confidence_start_time is None:
+                    self.confidence_start_time = time.time()
+                    self.last_detected_label = label
+                elif label == self.last_detected_label:
+                    elapsed_time = time.time() - self.confidence_start_time
+                    if elapsed_time >= self.confidence_duration:
+                        self.handle_sign_detection(label, conf)
+                        self.confidence_start_time = None
+                        self.last_detected_label = None
+                        self.feedback_label.setText(f"Detected: {label}")
+            else:
+                self.confidence_start_time = None
+                self.last_detected_label = None
+                self.feedback_label.setText("")
             
             return frame
             
@@ -416,17 +425,12 @@ class SmartTaxAdvisor(QMainWindow):
             question = QUESTIONS[self.current_q]
             self.question_label.setText(question['text'])
             
-            # Update progress
-            self.progress_label.setText(f"Question {self.current_q + 1} of {len(QUESTIONS)}")
-            
             if question.get('type') == 'digits':
                 self.asking_digits = True
                 self.expected_digits = question.get('digits', 1)
                 self.current_number = ""
-                self.input_display.setText(f"Enter {self.expected_digits} digit(s)")
             else:
                 self.asking_digits = False
-                self.input_display.setText("Show Y or N")
             
             self.current_q += 1
         else:
