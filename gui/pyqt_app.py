@@ -199,6 +199,16 @@ class SmartTaxAdvisor(QMainWindow):
         self.answer_timer.timeout.connect(self.show_next_question)
         self.showing_answer = False
         
+        # Hand tracking
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        self.mp_draw = mp.solutions.drawing_utils
+        
         # Create widgets
         self.setup_ui()
         
@@ -392,6 +402,18 @@ class SmartTaxAdvisor(QMainWindow):
             # Convert to RGB for MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
+            # Process hands for skeleton
+            results = self.hands.process(rgb_frame)
+            
+            # Draw hand landmarks if detected
+            if results.multi_hand_landmarks:
+                for hand_landmarks in results.multi_hand_landmarks:
+                    self.mp_draw.draw_landmarks(
+                        frame, 
+                        hand_landmarks, 
+                        self.mp_hands.HAND_CONNECTIONS
+                    )
+            
             # Determine which model to use based on the current question
             current_question = QUESTIONS[self.current_q - 1] if self.current_q > 0 else None
             use_digit_model = (
@@ -403,29 +425,58 @@ class SmartTaxAdvisor(QMainWindow):
             # Process with appropriate detector
             if use_digit_model:
                 label, conf = self.asl.recognize_digit(frame)
+                
+                # Update confidence display
+                self.current_confidence = conf
+                self.confidence_label.setText(f"Confidence: {conf:.2%}")
+                
+                # Handle confidence threshold and timing for digits
+                if conf >= self.confidence_threshold:
+                    if self.confidence_start_time is None:
+                        self.confidence_start_time = time.time()
+                        self.last_detected_label = label
+                    elif label == self.last_detected_label:
+                        elapsed_time = time.time() - self.confidence_start_time
+                        if elapsed_time >= self.confidence_duration:
+                            # Only accept the digit if we haven't already accepted it
+                            if self.can_accept_digit:
+                                self.handle_digit_input(label)
+                                self.can_accept_digit = False
+                else:
+                    # Reset confidence tracking if confidence drops
+                    self.confidence_start_time = None
+                    self.last_detected_label = None
+                    self.feedback_label.setText("")
             else:
+                # Handle letter detection (Y/N) as before
                 label, conf = self.asl.recognize_letter(frame)
+                self.current_confidence = conf
+                self.confidence_label.setText(f"Confidence: {conf:.2%}")
+                
+                if conf >= self.confidence_threshold:
+                    if self.confidence_start_time is None:
+                        self.confidence_start_time = time.time()
+                        self.last_detected_label = label
+                    elif label == self.last_detected_label:
+                        elapsed_time = time.time() - self.confidence_start_time
+                        if elapsed_time >= self.confidence_duration:
+                            self.handle_sign_detection(label, conf)
+                            self.confidence_start_time = None
+                            self.last_detected_label = None
+                            self.feedback_label.setText(f"Detected: {label}")
+                else:
+                    self.confidence_start_time = None
+                    self.last_detected_label = None
+                    self.feedback_label.setText("")
             
-            # Update confidence display
-            self.current_confidence = conf
-            self.confidence_label.setText(f"Confidence: {conf:.2%}")
-            
-            # Handle confidence threshold and timing
-            if conf >= self.confidence_threshold:
-                if self.confidence_start_time is None:
-                    self.confidence_start_time = time.time()
-                    self.last_detected_label = label
-                elif label == self.last_detected_label:
-                    elapsed_time = time.time() - self.confidence_start_time
-                    if elapsed_time >= self.confidence_duration:
-                        self.handle_sign_detection(label, conf)
-                        self.confidence_start_time = None
-                        self.last_detected_label = None
-                        self.feedback_label.setText(f"Detected: {label}")
+            # Check if hand is removed from frame
+            if not results.multi_hand_landmarks:
+                self.no_hand_frames += 1
+                if self.no_hand_frames > 10:  # About 1/3 second at 30 FPS
+                    self.can_accept_digit = True
+                    self.no_hand_frames = 0
             else:
-                self.confidence_start_time = None
-                self.last_detected_label = None
-                self.feedback_label.setText("")
+                self.no_hand_frames = 0
             
             return frame
             
@@ -433,26 +484,22 @@ class SmartTaxAdvisor(QMainWindow):
             self.logger.error(f"Error processing sign frame: {e}")
             return frame
     
+    def handle_digit_input(self, digit):
+        """Handle digit input for number questions"""
+        if digit.isdigit():
+            self.current_number += digit
+            self.feedback_label.setText(f"Entered: {self.current_number}")
+            
+            if len(self.current_number) == self.expected_digits:
+                self.answers[self.current_q] = self.current_number
+                self.asking_digits = False
+                self.show_answer(self.current_number)
+    
     def handle_sign_detection(self, label, confidence):
-        """Handle detected sign language input"""
-        current_question = QUESTIONS[self.current_q - 1] if self.current_q > 0 else None
-        is_digit_question = (
-            current_question and 
-            (current_question.get('type') == 'digits' or 
-             'children' in current_question.get('text', '').lower())
-        )
-        
-        if is_digit_question:
-            if label.isdigit():
-                self.current_number += label
-                if len(self.current_number) == self.expected_digits:
-                    self.answers[self.current_q] = self.current_number
-                    self.asking_digits = False
-                    self.show_answer(self.current_number)
-        else:
-            if label.upper() in ['Y', 'N']:
-                self.answers[self.current_q] = label.upper()
-                self.show_answer(label.upper())
+        """Handle detected sign language input for Y/N questions"""
+        if label.upper() in ['Y', 'N']:
+            self.answers[self.current_q] = label.upper()
+            self.show_answer(label.upper())
     
     def show_answer(self, answer):
         """Show the answer for 2 seconds before moving to next question"""
@@ -467,6 +514,8 @@ class SmartTaxAdvisor(QMainWindow):
         """Move to the next question after showing the answer"""
         self.showing_answer = False
         self.answer_label.hide()
+        self.current_number = ""  # Reset current number
+        self.can_accept_digit = True  # Reset digit acceptance flag
         self.ask_next()
     
     def select_sign_mode(self):
@@ -494,6 +543,7 @@ class SmartTaxAdvisor(QMainWindow):
                 self.asking_digits = True
                 self.expected_digits = question.get('digits', 1)
                 self.current_number = ""
+                self.can_accept_digit = True
             else:
                 self.asking_digits = False
             
