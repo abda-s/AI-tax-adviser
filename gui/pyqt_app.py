@@ -17,6 +17,7 @@ import sys
 import numpy as np
 import mediapipe as mp
 import logging
+import os
 
 class SpeechRecognitionThread(QThread):
     finished = pyqtSignal(str)
@@ -127,8 +128,14 @@ class SmartTaxAdvisor(QMainWindow):
         self.control_queue = control_queue
         self.logger = logging.getLogger(__name__)
         
+        # Set window flags for fullscreen on Raspberry Pi
+        if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
+            self.setWindowFlags(Qt.FramelessWindowHint)
+            self.showFullScreen()
+        else:
+            self.setGeometry(100, 100, 800, 600)
+        
         self.setWindowTitle('Smart Tax Advisor')
-        self.setGeometry(100, 100, 800, 600)
         
         # Create central widget and layout
         central_widget = QWidget()
@@ -190,6 +197,16 @@ class SmartTaxAdvisor(QMainWindow):
         # Set initial status for speech mode
         self.update_status("Not Listening", "gray")
         self.mic_indicator.set_listening(False)
+
+        # Add escape key handler for fullscreen mode
+        if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
+            QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == event.KeyPress and event.key() == Qt.Key_Escape:
+            self.close()
+            return True
+        return super().eventFilter(obj, event)
 
     def setup_ui(self):
         # Mode selection

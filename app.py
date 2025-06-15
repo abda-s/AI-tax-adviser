@@ -1,6 +1,7 @@
 # app.py
 import sys
 import logging
+import os
 from multiprocessing import Process, Queue
 from PyQt5.QtWidgets import QApplication
 from gui.pyqt_app import SmartTaxAdvisor
@@ -9,6 +10,9 @@ def main():
     # Set up logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
+    
+    # Set Qt platform to eglfs for Raspberry Pi
+    os.environ["QT_QPA_PLATFORM"] = "eglfs"
     
     # Create queues for inter-process communication
     frame_queue = Queue(maxsize=2)
