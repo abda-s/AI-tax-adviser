@@ -20,7 +20,7 @@ import logging
 import numpy as np
 import mediapipe as mp
 from queue import Queue
-from input.camera_process import CameraProcess
+from input.camera_process import camera_process
 from input.llm_processor import LLMProcessor
 
 class SpeechRecognitionThread(QThread):
