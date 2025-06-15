@@ -199,7 +199,7 @@ class SmartTaxAdvisor(QMainWindow):
         # Set up frame processing timer
         self.frame_timer = QTimer()
         self.frame_timer.timeout.connect(self.process_frame)
-        self.frame_timer.start(30)  # Process frames at ~30 FPS
+        self.frame_timer.start(30)  # 30ms = ~33 FPS
         
         # Create timers
         self.listening_timer = QTimer(self)
@@ -226,8 +226,14 @@ class SmartTaxAdvisor(QMainWindow):
             min_tracking_confidence=0.5
         )
         
-        # Initialize ASL detector
-        self.asl_detector = ASLDetector()
+        # Initialize ASL detector with model paths
+        model_dir = os.path.join(os.path.dirname(__file__), '..', 'models')
+        self.asl_detector = ASLDetector(
+            letter_model_path=os.path.join(model_dir, 'letter_model.h5'),
+            letter_map_path=os.path.join(model_dir, 'letter_map.json'),
+            digit_model_path=os.path.join(model_dir, 'digit_model.h5'),
+            digit_map_path=os.path.join(model_dir, 'digit_map.json')
+        )
         
         # Set up speech recognition
         self.speech_thread = SpeechRecognitionThread(self.sr)
