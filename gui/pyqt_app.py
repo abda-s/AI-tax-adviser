@@ -128,13 +128,8 @@ class SmartTaxAdvisor(QMainWindow):
         self.control_queue = control_queue
         self.logger = logging.getLogger(__name__)
         
-        # Set window flags for fullscreen on Raspberry Pi
-        if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
-            self.setWindowFlags(Qt.FramelessWindowHint)
-            self.showFullScreen()
-        else:
-            self.setGeometry(100, 100, 800, 600)
-        
+        # Set window size for Raspberry Pi display
+        self.setGeometry(50, 50, 800, 600)
         self.setWindowTitle('Smart Tax Advisor')
         
         # Create central widget and layout
@@ -197,16 +192,6 @@ class SmartTaxAdvisor(QMainWindow):
         # Set initial status for speech mode
         self.update_status("Not Listening", "gray")
         self.mic_indicator.set_listening(False)
-
-        # Add escape key handler for fullscreen mode
-        if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
-            QApplication.instance().installEventFilter(self)
-
-    def eventFilter(self, obj, event):
-        if event.type() == event.KeyPress and event.key() == Qt.Key_Escape:
-            self.close()
-            return True
-        return super().eventFilter(obj, event)
 
     def setup_ui(self):
         # Mode selection
