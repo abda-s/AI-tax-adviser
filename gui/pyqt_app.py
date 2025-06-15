@@ -128,8 +128,19 @@ class SmartTaxAdvisor(QMainWindow):
         self.control_queue = control_queue
         self.logger = logging.getLogger(__name__)
         
-        # Set window size and position
-        self.setGeometry(100, 100, 1024, 768)  # Width: 1024px, Height: 768px
+        # Set window flags for Raspberry Pi
+        if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
+            self.setWindowFlags(Qt.FramelessWindowHint)
+            # Set fixed size for Raspberry Pi display
+            self.setFixedSize(800, 600)
+            # Center the window on screen
+            screen = QApplication.primaryScreen().geometry()
+            x = (screen.width() - self.width()) // 2
+            y = (screen.height() - self.height()) // 2
+            self.move(x, y)
+        else:
+            self.setGeometry(100, 100, 800, 600)
+        
         self.setWindowTitle('Smart Tax Advisor')
         
         # Create central widget and layout
@@ -211,14 +222,14 @@ class SmartTaxAdvisor(QMainWindow):
         # Buttons
         self.sign_btn = QPushButton("Sign Language")
         self.sign_btn.clicked.connect(self.select_sign_mode)
-        self.sign_btn.setFixedSize(300, 200)  # Increased button size
+        self.sign_btn.setFixedSize(250, 150)
         self.sign_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
                 border-radius: 20px;
-                font-size: 24px;
-                padding: 15px 30px;
+                font-size: 20px;
+                padding: 10px 20px;
                 margin: 10px;
             }
             QPushButton:hover {
@@ -228,14 +239,14 @@ class SmartTaxAdvisor(QMainWindow):
         
         self.speech_btn = QPushButton("Speech Recognition")
         self.speech_btn.clicked.connect(self.select_speech_mode)
-        self.speech_btn.setFixedSize(300, 200)  # Increased button size
+        self.speech_btn.setFixedSize(250, 150)
         self.speech_btn.setStyleSheet("""
             QPushButton {
                 background-color: #008CBA;
                 color: white;
                 border-radius: 20px;
-                font-size: 24px;
-                padding: 15px 30px;
+                font-size: 20px;
+                padding: 10px 20px;
                 margin: 10px;
             }
             QPushButton:hover {
@@ -252,41 +263,14 @@ class SmartTaxAdvisor(QMainWindow):
         # Video display
         self.video_label = QLabel()
         self.video_label.setMinimumSize(640, 480)
-        self.video_label.setStyleSheet("""
-            QLabel {
-                border: 2px solid #ccc;
-                border-radius: 10px;
-                padding: 5px;
-            }
-        """)
         
         # Other UI elements
         self.question_label = QLabel()
-        self.question_label.setStyleSheet("""
-            font-size: 20px;
-            padding: 10px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-        """)
-        
+        self.question_label.setStyleSheet("font-size: 16px;")
         self.status_label = QLabel()
-        self.status_label.setStyleSheet("""
-            font-size: 16px;
-            color: #0066cc;
-            padding: 5px;
-        """)
-        
+        self.status_label.setStyleSheet("font-size: 12px; color: blue;")
         self.result_text = QTextEdit()
         self.result_text.setReadOnly(True)
-        self.result_text.setStyleSheet("""
-            QTextEdit {
-                font-size: 16px;
-                padding: 10px;
-                border: 2px solid #ccc;
-                border-radius: 5px;
-                background-color: white;
-            }
-        """)
         
         # Create microphone indicator
         self.mic_indicator = MicrophoneIndicator()

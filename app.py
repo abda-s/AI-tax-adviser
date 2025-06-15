@@ -9,7 +9,7 @@ import logging
 from PyQt5.QtWidgets import QApplication
 
 # Set Qt platform for Raspberry Pi
-os.environ["QT_QPA_PLATFORM"] = "wayland"
+os.environ["QT_QPA_PLATFORM"] = "eglfs"
 
 def signal_handler(signum, frame):
     """Handle termination signals"""
