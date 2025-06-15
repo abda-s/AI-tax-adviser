@@ -490,14 +490,22 @@ class SmartTaxAdvisor(QMainWindow):
                     self.number_feedback.setText(f"Final number: {final_number}")
                     self.answer_label.setText(f"Number: {final_number}")
                     self.answer_label.show()
+                    # Store the answer
+                    self.answers[self.current_q - 1] = final_number
                     QTimer.singleShot(2000, self.ask_next)
             else:
                 self.feedback_label.setText("Please show a digit")
         else:
-            self.feedback_label.setText(f"Detected: {label}")
-            self.answer_label.setText(f"Answer: {label}")
-            self.answer_label.show()
-            QTimer.singleShot(2000, self.ask_next)
+            # Handle Y/N answers
+            if label.upper() in ['Y', 'N']:
+                self.feedback_label.setText(f"Detected: {label.upper()}")
+                self.answer_label.setText(f"Answer: {label.upper()}")
+                self.answer_label.show()
+                # Store the answer
+                self.answers[self.current_q - 1] = label.upper()
+                QTimer.singleShot(2000, self.ask_next)
+            else:
+                self.feedback_label.setText("Please show Y or N")
     
     def show_answer(self, answer):
         """Show the answer for 2 seconds before moving to next question"""
