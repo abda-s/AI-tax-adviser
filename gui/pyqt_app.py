@@ -14,11 +14,14 @@ from tts.tts_engine import TTSEngine
 from collections import deque
 import speech_recognition as sr
 import sys
-import numpy as np
-import mediapipe as mp
-import logging
 import os
 import time
+import logging
+import numpy as np
+import mediapipe as mp
+from queue import Queue
+from input.camera_process import CameraProcess
+from input.llm_processor import LLMProcessor
 
 class SpeechRecognitionThread(QThread):
     finished = pyqtSignal(str)
@@ -123,278 +126,72 @@ class MicrophoneIndicator(QLabel):
         self.update()
 
 class SmartTaxAdvisor(QMainWindow):
-    def __init__(self, frame_queue, control_queue):
+    def __init__(self, frame_queue=None, control_queue=None):
         super().__init__()
-        self.frame_queue = frame_queue
-        self.control_queue = control_queue
         self.logger = logging.getLogger(__name__)
         
-        # Set window flags for Raspberry Pi
-        if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
-            self.setWindowFlags(Qt.FramelessWindowHint)
-            # Set fixed size for Raspberry Pi display
-            self.setFixedSize(800, 600)
-            # Center the window on screen
-            screen = QApplication.primaryScreen().geometry()
-            x = (screen.width() - self.width()) // 2
-            y = (screen.height() - self.height()) // 2
-            self.move(x, y)
-        else:
-            self.setGeometry(100, 100, 800, 600)
+        # Initialize queues with defaults if not provided
+        self.frame_queue = frame_queue if frame_queue is not None else Queue()
+        self.control_queue = control_queue if control_queue is not None else Queue()
         
-        self.setWindowTitle('Smart Tax Advisor')
-        
-        # Create central widget and layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        self.layout = QVBoxLayout(central_widget)
-        self.layout.setAlignment(Qt.AlignCenter)
-        
-        # Load modules
-        cfg = load_config()
-        self.asl = ASLDetector(
-            cfg['asl_model'], cfg['asl_map'],
-            cfg['digit_model'], cfg['digit_map'],
-            cfg['confidence_threshold']
-        )
-        self.sr = SpeechRecognizer()
-        self.tts = TTSEngine()
-        self.engine = TaxEngine()
-        self.text_processor = TextProcessor()
+        # Initialize components
+        self.asl = ASLDetector()
+        self.speech = SpeechRecognizer()
+        self.llm = LLMProcessor()
         
         # Initialize state variables
         self.current_q = 0
         self.answers = {}
-        self.selected_mode = None
+        self.current_mode = None
+        self.showing_answer = False
+        self.answer_timer = QTimer()
+        self.answer_timer.timeout.connect(self.hide_answer)
+        
+        # ASL detection state
+        self.confidence_threshold = 0.6
+        self.confidence_duration = 1.0
+        self.confidence_start_time = None
+        self.last_detected_label = None
+        self.current_confidence = 0.0
+        
+        # Digit input state
+        self.asking_digits = False
+        self.asking_digit_count = False
         self.current_number = ""
         self.expected_digits = 0
-        self.no_hand_frames = 0
         self.can_accept_digit = True
-        self.asking_digits = False
-        self.is_listening = False
-        self.is_capturing = False
-        self.asking_digit_count = False  # New state for asking number of digits
+        self.no_hand_frames = 0
         
-        # Confidence tracking
-        self.current_confidence = 0.0
-        self.confidence_start_time = None
-        self.confidence_threshold = 0.75
-        self.confidence_duration = 0.3  # seconds
-        self.last_detected_label = None
-        
-        # Hand tracking
-        self.hand_removed = False
-        self.hand_removed_frames = 0
-        self.hand_removed_threshold = 10  # frames
-        
-        # Answer display timer
-        self.answer_timer = QTimer()
-        self.answer_timer.setSingleShot(True)
-        self.answer_timer.timeout.connect(self.show_next_question)
-        self.showing_answer = False
-        
-        # Create widgets
+        # Set up UI
         self.setup_ui()
         
         # Set up frame processing timer
         self.frame_timer = QTimer()
         self.frame_timer.timeout.connect(self.process_frame)
-        self.frame_timer.start(30)  # Process frames at ~30 FPS
+        self.frame_timer.start(30)  # 30ms = ~33 FPS
         
-        # Create timers
-        self.listening_timer = QTimer(self)
-        self.listening_timer.timeout.connect(self.update_listening_animation)
-        self.mic_animation_timer = QTimer(self)
-        self.mic_animation_timer.timeout.connect(self.mic_indicator.update_animation)
-        self.mic_animation_timer.start(50)  # Update every 50ms for smooth animation
+        # Set window properties
+        self.setWindowTitle("Smart Tax Advisor")
+        self.showFullScreen()
         
-        # Set initial status for speech mode
-        self.update_status("Not Listening", "gray")
-        self.mic_indicator.set_listening(False)
-
-        # Add escape key handler for fullscreen mode
-        if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
-            QApplication.instance().installEventFilter(self)
-
-    def eventFilter(self, obj, event):
-        if event.type() == event.KeyPress and event.key() == Qt.Key_Escape:
-            self.close()
-            return True
-        return super().eventFilter(obj, event)
-
-    def setup_ui(self):
-        # Create container widgets for different modes
-        self.mode_selection_widget = QWidget()
-        self.mode_selection_layout = QVBoxLayout(self.mode_selection_widget)
-        
-        self.asl_widget = QWidget()
-        self.asl_layout = QVBoxLayout(self.asl_widget)
-        
-        self.results_widget = QWidget()
-        self.results_layout = QVBoxLayout(self.results_widget)
-        
-        # Mode selection
-        self.mode_label = QLabel("Select Input Mode:")
-        self.mode_label.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px;")
-        
-        # Buttons
-        self.sign_btn = QPushButton("Sign Language")
-        self.sign_btn.clicked.connect(self.select_sign_mode)
-        self.sign_btn.setFixedSize(250, 150)
-        self.sign_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border-radius: 20px;
-                font-size: 20px;
-                padding: 10px 20px;
-                margin: 10px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        
-        self.speech_btn = QPushButton("Speech Recognition")
-        self.speech_btn.clicked.connect(self.select_speech_mode)
-        self.speech_btn.setFixedSize(250, 150)
-        self.speech_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #008CBA;
-                color: white;
-                border-radius: 20px;
-                font-size: 20px;
-                padding: 10px 20px;
-                margin: 10px;
-            }
-            QPushButton:hover {
-                background-color: #007bb5;
-            }
-        """)
-        
-        # Layout for buttons
-        button_layout = QHBoxLayout()
-        button_layout.setAlignment(Qt.AlignCenter)
-        button_layout.addWidget(self.sign_btn)
-        button_layout.addWidget(self.speech_btn)
-        
-        # Add widgets to mode selection layout
-        self.mode_selection_layout.addWidget(self.mode_label)
-        self.mode_selection_layout.addLayout(button_layout)
-        
-        # Video display
-        self.video_label = QLabel()
-        self.video_label.setMinimumSize(640, 480)
-        
-        # Question and status labels
-        self.question_label = QLabel()
-        self.question_label.setStyleSheet("font-size: 16px;")
-        
-        # Status label
-        self.status_label = QLabel()
-        self.status_label.setStyleSheet("font-size: 14px; color: #666;")
-        
-        # Confidence display
-        self.confidence_label = QLabel()
-        self.confidence_label.setStyleSheet("""
-            font-size: 14px;
-            color: #666;
-            padding: 5px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-        """)
-        
-        # Feedback label
-        self.feedback_label = QLabel()
-        self.feedback_label.setStyleSheet("""
-            font-size: 16px;
-            color: #4CAF50;
-            padding: 5px;
-            background-color: #e8f5e9;
-            border-radius: 5px;
-        """)
-        
-        # Number input feedback
-        self.number_feedback = QLabel()
-        self.number_feedback.setStyleSheet("""
-            font-size: 48px;
-            color: #2196F3;
-            padding: 20px;
-            background-color: #E3F2FD;
-            border-radius: 15px;
-            margin: 10px;
-            font-weight: bold;
-        """)
-        self.number_feedback.setAlignment(Qt.AlignCenter)
-        self.number_feedback.setMinimumHeight(100)
-        self.number_feedback.hide()
-        
-        # Answer display label
-        self.answer_label = QLabel()
-        self.answer_label.setStyleSheet("""
-            font-size: 24px;
-            color: #2196F3;
-            padding: 10px;
-            background-color: #E3F2FD;
-            border-radius: 10px;
-            margin: 10px;
-        """)
-        self.answer_label.setAlignment(Qt.AlignCenter)
-        self.answer_label.hide()
-        
-        # Result text
-        self.result_text = QTextEdit()
-        self.result_text.setReadOnly(True)
-        self.result_text.setStyleSheet("""
-            font-size: 14px;
-            padding: 10px;
-            background-color: #f5f5f5;
-            border-radius: 5px;
-        """)
-        
-        # Create microphone indicator
-        self.mic_indicator = MicrophoneIndicator()
-        self.mic_indicator.hide()
-        
-        # Add widgets to ASL layout
-        self.asl_layout.addWidget(self.video_label)
-        self.asl_layout.addWidget(self.question_label)
-        self.asl_layout.addWidget(self.status_label)
-        self.asl_layout.addWidget(self.confidence_label)
-        self.asl_layout.addWidget(self.feedback_label)
-        self.asl_layout.addWidget(self.number_feedback)
-        self.asl_layout.addWidget(self.answer_label)
-        
-        # Add result text to results layout
-        self.results_layout.addWidget(self.result_text)
-        
-        # Add all widgets to main layout
-        self.layout.addWidget(self.mode_selection_widget)
-        self.layout.addWidget(self.asl_widget)
-        self.layout.addWidget(self.results_widget)
-        self.layout.addWidget(self.mic_indicator, alignment=Qt.AlignCenter)
-        
-        # Initially hide ASL widget and results widget
-        self.asl_widget.hide()
-        self.results_widget.hide()
-
     def process_frame(self):
-        """Process frames from the camera queue"""
-        if not self.frame_queue.empty():
-            frame = self.frame_queue.get()
-            
-            if self.selected_mode == "sign":
-                # Process frame for sign language
-                frame = self.process_sign_frame(frame)
-            elif self.selected_mode == "speech":
-                # Process frame for speech mode (just display)
-                pass
-            
-            # Convert frame to QImage and display
-            height, width, channel = frame.shape
-            bytes_per_line = 3 * width
-            q_image = QImage(frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
-            self.video_label.setPixmap(QPixmap.fromImage(q_image))
+        """Process incoming frames from the camera"""
+        try:
+            if not self.frame_queue.empty():
+                frame = self.frame_queue.get()
+                if frame is not None:
+                    if self.current_mode == "sign":
+                        processed_frame = self.process_sign_frame(frame)
+                    else:
+                        processed_frame = frame
+                    
+                    # Convert frame to QImage and display
+                    height, width, channel = processed_frame.shape
+                    bytes_per_line = 3 * width
+                    q_image = QImage(processed_frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                    self.video_label.setPixmap(QPixmap.fromImage(q_image))
+        except Exception as e:
+            self.logger.error(f"Error processing frame: {e}")
     
     def process_sign_frame(self, frame):
         """Process frame for sign language detection"""
@@ -405,7 +202,7 @@ class SmartTaxAdvisor(QMainWindow):
             # Convert to RGB for MediaPipe
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # Determine which model to use based on the current question
+            # Determine which model to use
             current_question = QUESTIONS[self.current_q - 1] if self.current_q > 0 else None
             use_digit_model = (
                 current_question and 
@@ -415,81 +212,175 @@ class SmartTaxAdvisor(QMainWindow):
             
             # Process with appropriate detector
             if use_digit_model:
-                label, conf = self.asl.recognize_digit(frame)
+                label, conf = self.safe_asl_recognition(rgb_frame, use_digit_model=True)
                 
-                # Check for hand removal
+                # Simplified hand tracking logic
                 if label is None:
-                    self.hand_removed_frames += 1
-                    if self.hand_removed_frames >= self.hand_removed_threshold:
-                        self.hand_removed = True
-                        self.hand_removed_frames = 0
+                    self.no_hand_frames += 1
+                    if self.no_hand_frames >= 5:  # Reduced threshold
+                        self.can_accept_digit = True
                 else:
-                    self.hand_removed_frames = 0
-                    self.hand_removed = False
+                    self.no_hand_frames = 0
+                    # Only process if we can accept digits and confidence is high
+                    if self.can_accept_digit and conf >= self.confidence_threshold:
+                        self.handle_digit_detection(label, conf)
+                        self.can_accept_digit = False  # Prevent multiple detections
             else:
-                label, conf = self.asl.recognize_letter(frame)
+                label, conf = self.safe_asl_recognition(rgb_frame, use_digit_model=False)
+                
+                # Consistent confidence handling for letters
+                if conf >= self.confidence_threshold:
+                    if self.confidence_start_time is None:
+                        self.confidence_start_time = time.time()
+                        self.last_detected_label = label
+                    elif label == self.last_detected_label:
+                        elapsed_time = time.time() - self.confidence_start_time
+                        if elapsed_time >= self.confidence_duration:
+                            self.handle_letter_detection(label, conf)
+                            self.confidence_start_time = None
+                            self.last_detected_label = None
+                    else:
+                        # Different label detected, reset timer
+                        self.confidence_start_time = time.time()
+                        self.last_detected_label = label
+                else:
+                    self.confidence_start_time = None
+                    self.last_detected_label = None
             
-            # Update confidence display
-            self.current_confidence = conf
-            self.confidence_label.setText(f"Confidence: {conf:.2%}")
-            
-            # Handle confidence threshold and timing
-            if conf >= self.confidence_threshold and (not use_digit_model or self.hand_removed):
-                if self.confidence_start_time is None:
-                    self.confidence_start_time = time.time()
-                    self.last_detected_label = label
-                elif label == self.last_detected_label:
-                    elapsed_time = time.time() - self.confidence_start_time
-                    if elapsed_time >= self.confidence_duration:
-                        self.handle_sign_detection(label, conf)
-                        self.confidence_start_time = None
-                        self.last_detected_label = None
-                        self.feedback_label.setText(f"Detected: {label}")
-                        if use_digit_model:
-                            self.hand_removed = False
-            else:
-                self.confidence_start_time = None
-                self.last_detected_label = None
-                if not use_digit_model:
-                    self.feedback_label.setText("")
-            
+            # Update display
+            self.update_confidence_display(conf)
             return frame
             
         except Exception as e:
             self.logger.error(f"Error processing sign frame: {e}")
             return frame
     
-    def handle_sign_detection(self, label, confidence):
-        """Handle detected sign language input"""
-        current_question = QUESTIONS[self.current_q - 1] if self.current_q > 0 else None
-        is_digit_question = (
-            current_question and 
-            (current_question.get('type') == 'digits' or 
-             'children' in current_question.get('text', '').lower())
-        )
-        
-        if is_digit_question:
-            if label.isdigit():
-                if self.asking_digit_count:
-                    # Handle digit count input
-                    self.expected_digits = int(label)
-                    self.asking_digit_count = False
-                    self.feedback_label.setText(f"Please enter {self.expected_digits} digits")
-                    self.number_feedback.setText("")
-                else:
-                    # Handle actual number input
-                    self.current_number += label
-                    self.feedback_label.setText(f"Detected digit: {label}")
-                    self.number_feedback.setText(self.current_number)
-                    self.number_feedback.show()
-                    if len(self.current_number) == self.expected_digits:
-                        self.answers[self.current_q] = self.current_number
-                        self.asking_digits = False
-                        self.show_answer(self.current_number)
+    def handle_digit_detection(self, label, confidence):
+        """Handle detected digit input"""
+        if not label.isdigit():
+            return
+            
+        if self.asking_digit_count:
+            # Handle digit count input
+            digit_count = int(label)
+            if 1 <= digit_count <= 9:  # Reasonable range
+                self.expected_digits = digit_count
+                self.asking_digit_count = False
+                self.current_number = ""
+                self.feedback_label.setText(f"Please enter {self.expected_digits} digits")
+                self.number_feedback.setText("")
+                self.number_feedback.show()
+            else:
+                self.feedback_label.setText("Please enter a number between 1 and 9")
         else:
-            if label.upper() in ['Y', 'N']:
-                self.answers[self.current_q] = label.upper()
-                self.show_answer(label.upper())
+            # Handle actual number input
+            if len(self.current_number) < self.expected_digits:
+                self.current_number += label
+                self.feedback_label.setText(f"Detected digit: {label}")
+                self.number_feedback.setText(self.current_number)
+                
+                if len(self.current_number) == self.expected_digits:
+                    self.answers[self.current_q] = self.current_number
+                    self.asking_digits = False
+                    self.show_answer(self.current_number)
+    
+    def handle_letter_detection(self, label, confidence):
+        """Handle detected letter input"""
+        if label.upper() in ['Y', 'N']:
+            self.answers[self.current_q] = label.upper()
+            self.show_answer(label.upper())
+            self.feedback_label.setText(f"Detected: {label.upper()}")
+    
+    def update_confidence_display(self, confidence):
+        """Update confidence display consistently"""
+        self.current_confidence = confidence
+        if confidence > 0:
+            self.confidence_label.setText(f"Confidence: {confidence:.2%}")
+            # Color code confidence
+            if confidence >= 0.8:
+                color = "#4CAF50"  # Green
+            elif confidence >= 0.6:
+                color = "#FF9800"  # Orange
+            else:
+                color = "#F44336"  # Red
+            
+            self.confidence_label.setStyleSheet(f"""
+                font-size: 14px;
+                color: {color};
+                padding: 5px;
+                background-color: #f0f0f0;
+                border-radius: 5px;
+                font-weight: bold;
+            """)
+        else:
+            self.confidence_label.setText("No detection")
+            self.confidence_label.setStyleSheet("""
+                font-size: 14px;
+                color: #666;
+                padding: 5px;
+                background-color: #f0f0f0;
+                border-radius: 5px;
+            """)
+    
+    def safe_asl_recognition(self, frame, use_digit_model=False):
+        """Safely perform ASL recognition with error handling"""
+        try:
+            if use_digit_model:
+                if hasattr(self.asl, 'recognize_digit'):
+                    return self.asl.recognize_digit(frame)
+                else:
+                    self.logger.warning("recognize_digit method not found")
+                    return None, 0.0
+            else:
+                if hasattr(self.asl, 'recognize_letter'):
+                    return self.asl.recognize_letter(frame)
+                else:
+                    self.logger.warning("recognize_letter method not found")
+                    return None, 0.0
+        except Exception as e:
+            self.logger.error(f"ASL recognition error: {e}")
+            return None, 0.0
+    
+    def ask_next(self):
+        """Ask the next question with proper setup"""
+        if self.current_q < len(QUESTIONS):
+            question = QUESTIONS[self.current_q]
+            self.question_label.setText(question['text'])
+            
+            # Clear previous state
+            self.confidence_start_time = None
+            self.last_detected_label = None
+            self.feedback_label.setText("")
+            
+            # Set up for digit input
+            if question.get('type') == 'digits' or 'children' in question.get('text', '').lower():
+                self.setup_digit_input()
+            else:
+                self.setup_letter_input()
+            
+            self.current_q += 1
+        else:
+            self.finish()
+    
+    def setup_digit_input(self):
+        """Set up for digit input questions"""
+        self.asking_digits = True
+        self.asking_digit_count = True
+        self.current_number = ""
+        self.expected_digits = 0
+        self.can_accept_digit = True
+        self.no_hand_frames = 0
+        
+        self.feedback_label.setText("Show the number of digits you'll enter")
+        self.number_feedback.setText("")
+        self.number_feedback.show()
+    
+    def setup_letter_input(self):
+        """Set up for letter input questions"""
+        self.asking_digits = False
+        self.asking_digit_count = False
+        self.number_feedback.hide()
+        self.feedback_label.setText("Show Y for Yes or N for No")
     
     def show_answer(self, answer):
         """Show the answer for 2 seconds before moving to next question"""
@@ -501,128 +392,20 @@ class SmartTaxAdvisor(QMainWindow):
         self.number_feedback.hide()
         self.answer_timer.start(2000)  # 2 seconds
     
-    def show_next_question(self):
-        """Move to the next question after showing the answer"""
+    def hide_answer(self):
+        """Hide the answer after 2 seconds"""
         self.showing_answer = False
         self.answer_label.hide()
         self.ask_next()
     
-    def select_sign_mode(self):
-        """Handle sign language mode selection"""
-        self.selected_mode = "sign"
-        self.mode_selection_widget.hide()
-        self.asl_widget.show()
-        self.ask_next()
-    
-    def select_speech_mode(self):
-        """Handle speech mode selection"""
-        self.selected_mode = "speech"
-        self.mode_selection_widget.hide()
-        self.asl_widget.show()
-        self.ask_next()
-    
-    def ask_next(self):
-        """Ask the next question"""
-        if self.current_q < len(QUESTIONS):
-            question = QUESTIONS[self.current_q]
-            self.question_label.setText(question['text'])
-            
-            # Set up for digit input if it's a digits question or about children
-            if question.get('type') == 'digits' or 'children' in question.get('text', '').lower():
-                self.asking_digits = True
-                self.asking_digit_count = True  # Start by asking for number of digits
-                self.current_number = ""
-                self.hand_removed = True  # Start with hand removed state
-                self.feedback_label.setText("Please enter the number of digits")
-                self.number_feedback.setText("")
-                self.number_feedback.show()
-            else:
-                self.asking_digits = False
-                self.asking_digit_count = False
-                self.number_feedback.hide()
-            
-            self.current_q += 1
-        else:
-            self.finish()
-    
     def finish(self):
         """Handle completion of questions"""
-        self.asl_widget.hide()
+        self.video_label.hide()
         
         # Process answers and display results
         result = self.engine.process_answers(self.answers)
         self.result_text.setText(result)
         self.results_widget.show()
-
-    def update_listening_animation(self):
-        """Update the listening animation dots"""
-        if self.selected_mode == 'speech' and self.is_listening:
-            self.listening_dots = (self.listening_dots + 1) % 4
-            dots = "." * self.listening_dots
-            self.status_label.setText(f"Listening{dots}")
-            self.status_label.setStyleSheet("font-size: 12px; color: green; font-weight: bold;")
-        elif self.selected_mode == 'speech':
-            self.status_label.setText("Not Listening")
-            self.status_label.setStyleSheet("font-size: 12px; color: gray;")
-
-    def update_status(self, message, color='blue'):
-        self.status_label.setText(message)
-        self.status_label.setStyleSheet(f"font-size: 12px; color: {color};")
-
-    def process_speech_result(self, raw):
-        """Process the speech recognition result"""
-        q = QUESTIONS[self.current_q]
-        self.update_status(f"Raw text: {raw}", "blue")
-        self.result_text.setText(f"Raw text: {raw}\n")
-        
-        processed_text = self.text_processor.process_text(raw, q['type'])
-        self.result_text.append(f"Processed text: {processed_text}\n")
-        
-        if q['type'] == 'number' and 'salary' in q['text'].lower():
-            if processed_text.isdigit() and 1 <= int(processed_text) <= 99999:
-                self.answers[q['id']] = processed_text
-                self.current_q += 1
-                self.is_listening = False
-                self.update_status("")
-                QTimer.singleShot(1500, self.ask_next)
-            else:
-                self.update_status("Please say a valid number between 1 and 99999", "red")
-                self.result_text.append("Please say a valid number between 1 and 99999")
-                self.is_listening = False
-                QTimer.singleShot(1000, self.capture_speech_answer)
-        else:
-            self.answers[q['id']] = processed_text
-            self.current_q += 1
-            self.is_listening = False
-            self.update_status("")
-            QTimer.singleShot(1500, self.ask_next)
-        
-        self.mic_indicator.set_listening(False) # Stop microphone animation
-        self.update_status("Not Listening", "gray") # Update status
-
-    def handle_speech_error(self, error_msg):
-        """Handle speech recognition errors"""
-        self.listening_timer.stop()
-        self.mic_indicator.set_listening(False)
-        self.update_status("Not Listening", "gray") # Update status
-        self.result_text.setText(f"Error: {error_msg}")
-        self.is_listening = False
-        QTimer.singleShot(1000, self.capture_speech_answer)
-
-    def capture_speech_answer(self):
-        if self.is_listening:
-            return
-
-        self.is_listening = True
-        self.listening_dots = 0
-        self.listening_timer.start(500)  # Update animation every 500ms
-        self.mic_indicator.set_listening(True)  # Start microphone animation
-        
-        # Create and start speech recognition thread
-        self.speech_thread = SpeechRecognitionThread(self.sr)
-        self.speech_thread.finished.connect(self.process_speech_result)
-        self.speech_thread.error.connect(self.handle_speech_error)
-        self.speech_thread.start()
 
 def main():
     app = QApplication(sys.argv)
