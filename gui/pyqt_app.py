@@ -1,11 +1,10 @@
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QColor
 import cv2
 from PIL import Image
-import numpy as np
 import mediapipe as mp
-import logging
+import numpy as np
 from config.config import load_config
 from questions import QUESTIONS
 from input.asl_detector import ASLDetector
@@ -18,12 +17,9 @@ from collections import deque
 import speech_recognition as sr
 import sys
 import os
-import time
+import logging
 
-# Set Qt platform for Linux
-os.environ["QT_QPA_PLATFORM"] = "eglfs"
-
-# Configure logging
+# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -61,7 +57,7 @@ class MicrophoneIndicator(QLabel):
         
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.Antialiasing)
         
         # Determine color based on listening state
         current_color = self.active_color
@@ -92,7 +88,7 @@ class MicrophoneIndicator(QLabel):
         if self.is_listening:
             wave_color = QColor(current_color.red(), current_color.green(), current_color.blue(), current_alpha // 2)
             painter.setPen(wave_color)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setBrush(Qt.NoBrush)
             
             # Draw three arcs
             for i in range(3):
@@ -139,7 +135,7 @@ class SmartTaxAdvisor(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         self.layout = QVBoxLayout(central_widget)
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.setAlignment(Qt.AlignCenter) # Center the main layout content
         
         # Load modules
         cfg = load_config()
@@ -167,73 +163,42 @@ class SmartTaxAdvisor(QMainWindow):
         self.listening_dots = 0
         self.speech_thread = None
 
-        # Confidence tracking
-        self.current_confidence = 0.0
-        self.confidence_start_time = None
-        self.confidence_threshold = 0.75
-        self.confidence_duration = 0.3  # seconds
-        self.last_detected_label = None
-
-        # Hand tracking
-        self.hand_removed = False
-        self.hand_removed_frames = 0
-        self.hand_removed_threshold = 10  # frames
-
         # Debounce settings
         self.FRAME_BUFFER = 5
         self.buffer = deque(maxlen=self.FRAME_BUFFER)
         self.last_label = None
 
-        # Camera setup for Linux
+        # Camera setup
         try:
+            # Try to use picamera2 first (Raspberry Pi)
+            from picamera2 import Picamera2
+            self.picam2 = Picamera2()
+            self.picam2.configure(self.picam2.create_preview_configuration(main={"size": (640, 480)}))
+            self.picam2.start()
+            self.use_picamera = True
+            logger.info("Using Picamera2 for video capture")
+        except ImportError:
+            # Fall back to OpenCV
             self.cap = cv2.VideoCapture(0)
-            if not self.cap.isOpened():
-                # Try alternative camera index
-                self.cap = cv2.VideoCapture(1)
-            if not self.cap.isOpened():
-                raise Exception("Could not open camera")
-                
-            # Set camera properties
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.cap.set(cv2.CAP_PROP_FPS, 30)
-            
-            # Set buffer size to minimize latency
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception as e:
-            logger.error(f"Error initializing camera: {e}")
-            self.cap = None
+            self.use_picamera = False
+            logger.info("Using OpenCV for video capture")
 
-        # Setup UI
-        self.setup_ui()
-
-        # Create timers
-        self.listening_timer = QTimer(self)
-        self.listening_timer.timeout.connect(self.update_listening_animation)
-        self.mic_animation_timer = QTimer(self)
-        self.mic_animation_timer.timeout.connect(self.mic_indicator.update_animation)
-        self.mic_animation_timer.start(50)  # Update every 50ms for smooth animation
+        # Initialize MediaPipe
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.7,
+            min_tracking_confidence=0.5
+        )
+        self.mp_draw = mp.solutions.drawing_utils
         
-        # Set initial status for speech mode
-        self.update_status("Not Listening", "gray")
-        self.mic_indicator.set_listening(False)
-
-    def setup_ui(self):
-        # Create container widgets for different modes
-        self.mode_selection_widget = QWidget()
-        self.mode_selection_layout = QVBoxLayout(self.mode_selection_widget)
-        
-        self.asl_widget = QWidget()
-        self.asl_layout = QVBoxLayout(self.asl_widget)
-        
-        self.results_widget = QWidget()
-        self.results_layout = QVBoxLayout(self.results_widget)
-        
-        # Mode selection
+        # Create widgets
         self.mode_label = QLabel("Select Input Mode:")
         self.mode_label.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px;")
         
-        # Buttons
         self.sign_btn = QPushButton("Sign Language")
         self.sign_btn.clicked.connect(self.select_sign_mode)
         self.sign_btn.setFixedSize(250, 150)
@@ -268,110 +233,50 @@ class SmartTaxAdvisor(QMainWindow):
             }
         """)
         
-        # Layout for buttons
+        # Create horizontal layout for buttons
         button_layout = QHBoxLayout()
-        button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        button_layout.setAlignment(Qt.AlignCenter)
         button_layout.addWidget(self.sign_btn)
         button_layout.addWidget(self.speech_btn)
-        
-        # Add widgets to mode selection layout
-        self.mode_selection_layout.addWidget(self.mode_label)
-        self.mode_selection_layout.addLayout(button_layout)
-        
-        # Video display
+
         self.video_label = QLabel()
         self.video_label.setMinimumSize(640, 480)
-        
-        # Question and status labels
         self.question_label = QLabel()
         self.question_label.setStyleSheet("font-size: 16px;")
-        
-        # Status label
         self.status_label = QLabel()
-        self.status_label.setStyleSheet("font-size: 14px; color: #666;")
-        
-        # Confidence display
-        self.confidence_label = QLabel()
-        self.confidence_label.setStyleSheet("""
-            font-size: 14px;
-            color: #666;
-            padding: 5px;
-            background-color: #f0f0f0;
-            border-radius: 5px;
-        """)
-        
-        # Feedback label
-        self.feedback_label = QLabel()
-        self.feedback_label.setStyleSheet("""
-            font-size: 16px;
-            color: #4CAF50;
-            padding: 5px;
-            background-color: #e8f5e9;
-            border-radius: 5px;
-        """)
-        
-        # Number input feedback
-        self.number_feedback = QLabel()
-        self.number_feedback.setStyleSheet("""
-            font-size: 48px;
-            color: #2196F3;
-            padding: 20px;
-            background-color: #E3F2FD;
-            border-radius: 15px;
-            margin: 10px;
-            font-weight: bold;
-        """)
-        self.number_feedback.setAlignment(Qt.AlignCenter)
-        self.number_feedback.setMinimumHeight(100)
-        self.number_feedback.hide()
-        
-        # Answer display label
-        self.answer_label = QLabel()
-        self.answer_label.setStyleSheet("""
-            font-size: 24px;
-            color: #2196F3;
-            padding: 10px;
-            background-color: #E3F2FD;
-            border-radius: 10px;
-            margin: 10px;
-        """)
-        self.answer_label.setAlignment(Qt.AlignCenter)
-        self.answer_label.hide()
-        
-        # Result text
+        self.status_label.setStyleSheet("font-size: 12px; color: blue;")
         self.result_text = QTextEdit()
         self.result_text.setReadOnly(True)
-        self.result_text.setStyleSheet("""
-            font-size: 14px;
-            padding: 10px;
-            background-color: #f5f5f5;
-            border-radius: 5px;
-        """)
         
         # Create microphone indicator
         self.mic_indicator = MicrophoneIndicator()
         self.mic_indicator.hide()
         
-        # Add widgets to ASL layout
-        self.asl_layout.addWidget(self.video_label)
-        self.asl_layout.addWidget(self.question_label)
-        self.asl_layout.addWidget(self.status_label)
-        self.asl_layout.addWidget(self.confidence_label)
-        self.asl_layout.addWidget(self.feedback_label)
-        self.asl_layout.addWidget(self.number_feedback)
-        self.asl_layout.addWidget(self.answer_label)
+        # Add widgets to layout
+        self.layout.addWidget(self.mode_label, alignment=Qt.AlignCenter)
+        self.layout.addLayout(button_layout)
+        self.layout.addWidget(self.video_label)
+        self.layout.addWidget(self.question_label)
+        self.layout.addWidget(self.status_label)
+        self.layout.addWidget(self.mic_indicator, alignment=Qt.AlignCenter)
+        self.layout.addWidget(self.result_text)
         
-        # Add result text to results layout
-        self.results_layout.addWidget(self.result_text)
+        # Hide video and question widgets initially
+        self.video_label.hide()
+        self.question_label.hide()
+        self.status_label.hide()
+        self.result_text.hide()
+
+        # Create timers
+        self.listening_timer = QTimer(self)
+        self.listening_timer.timeout.connect(self.update_listening_animation)
+        self.mic_animation_timer = QTimer(self)
+        self.mic_animation_timer.timeout.connect(self.mic_indicator.update_animation)
+        self.mic_animation_timer.start(50)  # Update every 50ms for smooth animation
         
-        # Add all widgets to main layout
-        self.layout.addWidget(self.mode_selection_widget)
-        self.layout.addWidget(self.asl_widget)
-        self.layout.addWidget(self.results_widget)
-        
-        # Initially hide ASL widget and results widget
-        self.asl_widget.hide()
-        self.results_widget.hide()
+        # Set initial status for speech mode
+        self.update_status("Not Listening", "gray")
+        self.mic_indicator.set_listening(False)
 
     def update_listening_animation(self):
         """Update the listening animation dots"""
@@ -385,11 +290,6 @@ class SmartTaxAdvisor(QMainWindow):
             self.status_label.setStyleSheet("font-size: 12px; color: gray;")
 
     def select_sign_mode(self):
-        if not self.cap or not self.cap.isOpened():
-            self.status_label.setText("Error: Camera not available")
-            self.status_label.setStyleSheet("font-size: 12px; color: red;")
-            return
-            
         self.selected_mode = 'sign'
         self.mode_label.hide()
         self.sign_btn.hide()
@@ -543,14 +443,33 @@ class SmartTaxAdvisor(QMainWindow):
         self.speech_thread.start()
 
     def update_frame(self):
-        if not self.is_capturing or not self.cap or not self.cap.isOpened():
+        if not self.is_capturing:
             return
 
-        ret, frame = self.cap.read()
-        if not ret:
-            return
+        # Get frame from appropriate camera source
+        if self.use_picamera:
+            frame = self.picam2.capture_array()
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        else:
+            ret, frame = self.cap.read()
+            if not ret:
+                return
 
         frame = cv2.flip(frame, 1)
+        
+        # Convert to RGB for MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(rgb_frame)
+        
+        # Draw hand landmarks if detected
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                self.mp_draw.draw_landmarks(
+                    frame, 
+                    hand_landmarks, 
+                    self.mp_hands.HAND_CONNECTIONS
+                )
+        
         q = QUESTIONS[self.current_q]
 
         if self.selected_mode == 'sign':
@@ -582,17 +501,7 @@ class SmartTaxAdvisor(QMainWindow):
             else:
                 label, conf = self.asl.recognize_digit(frame)
                 
-                # Check for hand removal
-                if label is None:
-                    self.hand_removed_frames += 1
-                    if self.hand_removed_frames >= self.hand_removed_threshold:
-                        self.hand_removed = True
-                        self.hand_removed_frames = 0
-                else:
-                    self.hand_removed_frames = 0
-                    self.hand_removed = False
-                
-                if label and conf >= self.asl.conf_threshold and self.hand_removed:
+                if label and conf >= self.asl.conf_threshold:
                     cv2.putText(frame, f'Current: {self.current_number}{label} ({conf*100:.1f}%)', (10, 30),
                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
                     self.buffer.append(label)
@@ -612,7 +521,7 @@ class SmartTaxAdvisor(QMainWindow):
                 if len(self.buffer) == self.FRAME_BUFFER:
                     if self.buffer.count(self.buffer[0]) == self.FRAME_BUFFER:
                         stable = self.buffer[0]
-                        if stable and self.can_accept_digit and self.hand_removed:
+                        if stable and self.can_accept_digit:
                             if self.asking_digits:
                                 if '1' <= stable <= '5':
                                     self.expected_digits = int(stable)
@@ -635,15 +544,18 @@ class SmartTaxAdvisor(QMainWindow):
         rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_image.shape
         bytes_per_line = ch * w
-        qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+        qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
         self.video_label.setPixmap(QPixmap.fromImage(qt_image))
 
         # Schedule next update
         QTimer.singleShot(10, self.update_frame)
 
     def finish(self):
-        if self.cap and self.cap.isOpened():
+        if not self.use_picamera:
             self.cap.release()
+        
+        # Clean up MediaPipe
+        self.hands.close()
         
         # Display collected answers
         answers_summary = """<h2>Your Answers:</h2>"""
@@ -668,7 +580,13 @@ class SmartTaxAdvisor(QMainWindow):
         self.update_status("Questionnaire completed!", "green")
 
 def main():
+    # Set Qt platform for Raspberry Pi
+    os.environ["QT_QPA_PLATFORM"] = "eglfs"
+    
     app = QApplication(sys.argv)
     window = SmartTaxAdvisor()
     window.show()
-    sys.exit(app.exec()) 
+    sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    main() 
