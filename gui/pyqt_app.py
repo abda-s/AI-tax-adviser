@@ -290,6 +290,10 @@ class SmartTaxAdvisor(QMainWindow):
         self.question_label = QLabel()
         self.question_label.setStyleSheet("font-size: 16px;")
         
+        # Status label
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet("font-size: 14px; color: #666;")
+        
         # Confidence display
         self.confidence_label = QLabel()
         self.confidence_label.setStyleSheet("""
@@ -355,6 +359,7 @@ class SmartTaxAdvisor(QMainWindow):
         # Add widgets to ASL layout
         self.asl_layout.addWidget(self.video_label)
         self.asl_layout.addWidget(self.question_label)
+        self.asl_layout.addWidget(self.status_label)
         self.asl_layout.addWidget(self.confidence_label)
         self.asl_layout.addWidget(self.feedback_label)
         self.asl_layout.addWidget(self.number_feedback)
