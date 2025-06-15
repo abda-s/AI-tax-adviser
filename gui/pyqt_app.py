@@ -236,6 +236,9 @@ class SmartTaxAdvisor(QMainWindow):
         self.asl_widget = QWidget()
         self.asl_layout = QVBoxLayout(self.asl_widget)
         
+        self.results_widget = QWidget()
+        self.results_layout = QVBoxLayout(self.results_widget)
+        
         # Mode selection
         self.mode_label = QLabel("Select Input Mode:")
         self.mode_label.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px;")
@@ -328,19 +331,39 @@ class SmartTaxAdvisor(QMainWindow):
         self.answer_label.setAlignment(Qt.AlignCenter)
         self.answer_label.hide()
         
+        # Result text
+        self.result_text = QTextEdit()
+        self.result_text.setReadOnly(True)
+        self.result_text.setStyleSheet("""
+            font-size: 14px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        """)
+        
         # Create microphone indicator
         self.mic_indicator = MicrophoneIndicator()
         self.mic_indicator.hide()
         
-        # Add mode widgets to main layout
+        # Add widgets to ASL layout
+        self.asl_layout.addWidget(self.video_label)
+        self.asl_layout.addWidget(self.question_label)
+        self.asl_layout.addWidget(self.confidence_label)
+        self.asl_layout.addWidget(self.feedback_label)
+        self.asl_layout.addWidget(self.answer_label)
+        
+        # Add result text to results layout
+        self.results_layout.addWidget(self.result_text)
+        
+        # Add all widgets to main layout
         self.layout.addWidget(self.mode_selection_widget)
         self.layout.addWidget(self.asl_widget)
+        self.layout.addWidget(self.results_widget)
         self.layout.addWidget(self.mic_indicator, alignment=Qt.AlignCenter)
-        self.layout.addWidget(self.result_text)
         
-        # Initially hide ASL widget and result text
+        # Initially hide ASL widget and results widget
         self.asl_widget.hide()
-        self.result_text.hide()
+        self.results_widget.hide()
 
     def process_frame(self):
         """Process frames from the camera queue"""
@@ -469,7 +492,7 @@ class SmartTaxAdvisor(QMainWindow):
         # Process answers and display results
         result = self.engine.process_answers(self.answers)
         self.result_text.setText(result)
-        self.result_text.show()
+        self.results_widget.show()
 
     def update_listening_animation(self):
         """Update the listening animation dots"""
