@@ -353,10 +353,20 @@ class SmartTaxAdvisor(QMainWindow):
         self.yn_prediction_label = QLabel()
         self.yn_prediction_label.setStyleSheet("font-size: 20px; color: green; font-weight: bold;")
         self.yn_prediction_label.setAlignment(Qt.AlignCenter)
-        self.asl_layout.insertWidget(1, self.yn_expected_label)
-        self.asl_layout.insertWidget(2, self.yn_prediction_label)
+        self.input_feedback = QLabel()
+        self.input_feedback.setStyleSheet("font-size: 24px; font-weight: bold; color: #4CAF50;")
+        self.input_feedback.setAlignment(Qt.AlignCenter)
+        self.digit_requirement = QLabel()
+        self.digit_requirement.setStyleSheet("font-size: 16px; color: #666;")
+        self.digit_requirement.setAlignment(Qt.AlignCenter)
+        self.asl_layout.addWidget(self.yn_expected_label)
+        self.asl_layout.addWidget(self.yn_prediction_label)
+        self.asl_layout.addWidget(self.input_feedback)
+        self.asl_layout.addWidget(self.digit_requirement)
         self.yn_expected_label.hide()
         self.yn_prediction_label.hide()
+        self.input_feedback.hide()
+        self.digit_requirement.hide()
 
     def process_frame(self):
         """Process frames from the camera queue"""
@@ -370,6 +380,14 @@ class SmartTaxAdvisor(QMainWindow):
                 # Process frame for speech mode (just display)
                 pass
             
+            # Draw skeleton if available (restore this logic)
+            if hasattr(self.asl, 'draw_skeleton'):
+                frame = self.asl.draw_skeleton(frame)
+            # Update feedback labels visibility
+            self.yn_expected_label.show()
+            self.yn_prediction_label.show()
+            self.input_feedback.show()
+            self.digit_requirement.show()
             # Convert frame to QImage and display
             height, width, channel = frame.shape
             bytes_per_line = 3 * width
