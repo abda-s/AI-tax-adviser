@@ -18,6 +18,7 @@ import speech_recognition as sr
 import sys
 import os
 import logging
+import queue
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -184,23 +185,6 @@ class SmartTaxAdvisor(QMainWindow):
         self.buffer = deque(maxlen=self.FRAME_BUFFER)
         self.last_label = None
 
-        # Camera setup
-        try:
-            # Try to use picamera2 first (Raspberry Pi)
-            from picamera2 import Picamera2
-            self.picam2 = Picamera2()
-            self.picam2.configure(self.picam2.create_preview_configuration(main={"size": (640, 480)}))
-            self.picam2.start()
-            self.use_picamera = True
-            logger.info("Using Picamera2 for video capture")
-        except ImportError:
-            # Fall back to OpenCV
-            self.cap = cv2.VideoCapture(0)
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.use_picamera = False
-            logger.info("Using OpenCV for video capture")
-
         # Initialize MediaPipe
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
@@ -297,6 +281,36 @@ class SmartTaxAdvisor(QMainWindow):
         # Add escape key handler for fullscreen mode
         if os.environ.get("QT_QPA_PLATFORM") == "eglfs":
             QApplication.instance().installEventFilter(self)
+
+        # Start frame processing timer
+        self.frame_timer = QTimer(self)
+        self.frame_timer.timeout.connect(self.process_frame)
+        self.frame_timer.start(30)  # Process frames at ~30 FPS
+
+    def process_frame(self):
+        """Process frames from the camera process queue"""
+        if self.frame_queue and not self.frame_queue.empty():
+            try:
+                frame = self.frame_queue.get_nowait()
+                if frame is not None:
+                    # Process frame with MediaPipe
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    results = self.hands.process(frame_rgb)
+                    
+                    if results.multi_hand_landmarks:
+                        for hand_landmarks in results.multi_hand_landmarks:
+                            self.mp_draw.draw_landmarks(
+                                frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+                    
+                    # Convert frame to QImage and display
+                    h, w, ch = frame.shape
+                    bytes_per_line = ch * w
+                    qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                    self.video_label.setPixmap(QPixmap.fromImage(qt_image))
+            except queue.Empty:
+                pass
+            except Exception as e:
+                self.logger.error(f"Error processing frame: {str(e)}")
 
     def eventFilter(self, obj, event):
         if event.type() == event.KeyPress and event.key() == Qt.Key_Escape:
