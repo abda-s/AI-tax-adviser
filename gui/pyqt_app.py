@@ -193,6 +193,11 @@ class SmartTaxAdvisor(QMainWindow):
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 640)
         
+        # Answer display timer
+        self.answer_timer = QTimer()
+        self.answer_timer.timeout.connect(self.show_next_question)
+        self.answer_timer.setSingleShot(True)
+        
         # Create widgets
         self.setup_ui()
         
@@ -407,6 +412,31 @@ class SmartTaxAdvisor(QMainWindow):
                 self.answers[self.current_q] = label.upper()
                 self.show_answer(label.upper())
     
+    def show_answer(self, answer):
+        """Display the answer for 2 seconds before moving to next question"""
+        # Show the answer
+        self.answer_display.setText(f"Answer: {answer}")
+        self.answer_display.show()
+        
+        # Hide other feedback
+        self.feedback_label.hide()
+        self.confidence_label.hide()
+        
+        # Start timer to show next question
+        self.answer_timer.start(2000)  # 2000 ms = 2 seconds
+    
+    def show_next_question(self):
+        """Handle transition to next question"""
+        # Hide answer display
+        self.answer_display.hide()
+        
+        # Show feedback elements again
+        self.feedback_label.show()
+        self.confidence_label.show()
+        
+        # Move to next question
+        self.ask_next()
+    
     def select_sign_mode(self):
         """Handle sign language mode selection"""
         self.selected_mode = "sign"
@@ -516,33 +546,6 @@ class SmartTaxAdvisor(QMainWindow):
         self.speech_thread.finished.connect(self.process_speech_result)
         self.speech_thread.error.connect(self.handle_speech_error)
         self.speech_thread.start()
-
-    def show_answer(self, answer):
-        """Display the answer for 2 seconds before moving to next question"""
-        # Show the answer
-        self.answer_display.setText(f"Answer: {answer}")
-        self.answer_display.show()
-        
-        # Hide other UI elements during answer display
-        self.question_label.hide()
-        self.confidence_label.hide()
-        self.feedback_label.hide()
-        
-        # Start timer to show next question
-        self.answer_timer.start(2000)  # 2000 ms = 2 seconds
-    
-    def show_next_question(self):
-        """Show the next question after answer display"""
-        # Hide answer display
-        self.answer_display.hide()
-        
-        # Show UI elements again
-        self.question_label.show()
-        self.confidence_label.show()
-        self.feedback_label.show()
-        
-        # Move to next question
-        self.ask_next()
 
 def main():
     app = QApplication(sys.argv)
